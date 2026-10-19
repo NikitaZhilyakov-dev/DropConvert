@@ -1,5 +1,5 @@
-# Сборка: pyinstaller DropConvert.spec --noconfirm
-# На macOS получится dist/DropConvert.app, на Windows — dist/DropConvert/DropConvert.exe
+# Build: pyinstaller DropConvert.spec --noconfirm
+# Produces dist/DropConvert.app on macOS, dist/DropConvert/DropConvert.exe on Windows
 import sys
 
 from PyInstaller.utils.hooks import collect_all
@@ -37,12 +37,12 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleShortVersionString": "0.1.0",
             "NSHighResolutionCapable": True,
-            # Живём в строке меню; значок в Dock появляется, только пока открыто окно
+            # Lives in the menu bar; the Dock icon shows only while the window is open
             "LSUIElement": True,
-            # Текст запроса доступа к Finder, чтобы узнать выделенные файлы
-            "NSAppleEventsUsageDescription": "DropConvert узнаёт у Finder, какие файлы выделены, "
-            "чтобы показать меню конвертации.",
-            # Разрешает бросать файлы на иконку приложения в Dock
+            # Text of the Finder access prompt, used to learn the selected files
+            "NSAppleEventsUsageDescription": "DropConvert asks Finder which files are selected "
+            "to show the convert menu.",
+            # Allows dropping files on the app's Dock icon
             "CFBundleDocumentTypes": [
                 {
                     "CFBundleTypeName": "Media",

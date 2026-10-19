@@ -71,18 +71,18 @@ def test_broken_video_reports_error(tmp_path):
     assert not (tmp_path / "broken.webm").exists()
 
 
-# ---------- Инструменты ----------
+# ---------- Tools ----------
 
 @pytest.fixture
 def photo(tmp_path):
-    """JPEG с EXIF (камера, GPS, поворот на 90°) и белыми полями вокруг шума."""
+    """JPEG with EXIF (camera, GPS, 90° rotation) and white borders around noise."""
     path = tmp_path / "photo.jpg"
     im = Image.new("RGB", (200, 100), "white")
     im.paste(Image.effect_noise((160, 60), 80).convert("RGB"), (20, 20))
     exif = Image.Exif()
     exif[0x010F] = "Camera"
-    exif[0x0112] = 6  # повернуть на 90° по часовой
-    exif.get_ifd(0x8825)[2] = (55.0, 45.0, 0.0)  # широта
+    exif[0x0112] = 6  # rotate 90° clockwise
+    exif.get_ifd(0x8825)[2] = (55.0, 45.0, 0.0)  # latitude
     im.save(path, quality=95, exif=exif)
     return path
 
@@ -102,8 +102,8 @@ def test_tools_keep_format(tmp_path, tool, fmt):
         return
     try:
         out = apply_tool(src, tool)
-    except ConversionError as e:  # сжатие может честно отказаться, если выигрыша нет
-        assert tool == "compress" and "оптимизирован" in str(e)
+    except ConversionError as e:  # compression may fairly refuse if there's no gain
+        assert tool == "compress" and "optimized" in str(e)
         return
     assert out.suffix == f".{fmt}" and out.parent == tmp_path
     assert not list(tmp_path.glob("*.converting*"))
@@ -118,10 +118,10 @@ def test_tools_keep_format(tmp_path, tool, fmt):
 
 def test_strip_removes_metadata_and_keeps_orientation(photo):
     out = apply_tool(photo, "strip")
-    assert out.name == "photo (без метаданных).jpg"
+    assert out.name == "photo (no metadata).jpg"
     with Image.open(out) as im:
         assert not im.getexif()
-        assert im.size == (100, 200)  # поворот из EXIF применён к пикселям
+        assert im.size == (100, 200)  # EXIF rotation applied to the pixels
 
 
 def test_strip_upright_jpeg_is_lossless(tmp_path):
@@ -151,13 +151,13 @@ def test_compress_makes_jpeg_smaller(photo):
 def test_trim_cuts_white_margins(photo):
     out = apply_tool(photo, "trim")
     with Image.open(out) as im:
-        assert abs(im.width - 60) <= 2 and abs(im.height - 160) <= 2  # после поворота
+        assert abs(im.width - 60) <= 2 and abs(im.height - 160) <= 2  # after rotation
 
 
 def test_tool_output_does_not_overwrite(photo):
     first = apply_tool(photo, "rotate")
     second = apply_tool(photo, "rotate")
-    assert first != second and second.name == "photo (повёрнуто) (1).jpg"
+    assert first != second and second.name == "photo (rotated) (1).jpg"
 
 
 def test_tools_reject_video(sample_video):

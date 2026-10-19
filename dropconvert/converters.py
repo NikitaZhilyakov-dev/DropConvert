@@ -1,4 +1,4 @@
-"""Сама конвертация: изображения через Pillow, видео и аудио через ffmpeg."""
+"""The conversion itself: images via Pillow, video and audio via ffmpeg."""
 from __future__ import annotations
 
 import re
@@ -18,10 +18,11 @@ try:
     import pillow_heif
 
     pillow_heif.register_heif_opener()
-except ImportError:  # HEIC останется недоступен, остальное работает
+except ImportError:  # HEIC stays unavailable, everything else works
     pillow_heif = None
 
 ProgressCallback = Callable[[float], None]
+CANCELLED = "Cancelled"
 
 
 class ConversionError(Exception):
@@ -29,7 +30,7 @@ class ConversionError(Exception):
 
 
 def free_path(dst: Path) -> Path:
-    """Если имя занято, добавляем « (1)», « (2)» и т.д."""
+    """If the name is taken, append " (1)", " (2)" and so on."""
     base, n = dst, 1
     while dst.exists():
         dst = base.with_name(f"{base.stem} ({n}){base.suffix}")
@@ -38,12 +39,12 @@ def free_path(dst: Path) -> Path:
 
 
 def output_path(src: Path, fmt: str) -> Path:
-    """Файл рядом с исходным, с новым расширением."""
+    """A file next to the source, with the new extension."""
     return free_path(src.with_suffix(f".{fmt}"))
 
 
 def _write_via_tmp(dst: Path, write: Callable[[Path], None]) -> None:
-    """Пишем во временный файл, чтобы при ошибке не оставлять битый результат."""
+    """Write to a temp file so a failure doesn't leave a broken result behind."""
     tmp = dst.with_name(f"{dst.stem}.converting{dst.suffix}")
     try:
         write(tmp)
@@ -60,9 +61,9 @@ def convert(
 ) -> Path:
     category = formats.detect(src)
     if category is None:
-        raise ConversionError("Неподдерживаемый формат")
+        raise ConversionError("Unsupported format")
     if fmt not in formats.TARGETS[category]:
-        raise ConversionError(f"Нельзя конвертировать в {fmt.upper()}")
+        raise ConversionError(f"Can't convert to {fmt.upper()}")
 
     dst = output_path(src, fmt)
     if category == formats.IMAGE:
@@ -73,7 +74,7 @@ def convert(
     return dst
 
 
-# ---------- Изображения ----------
+# ---------- Images ----------
 
 _PIL_FORMATS = {
     "png": "PNG", "jpg": "JPEG", "webp": "WEBP", "heic": "HEIF", "avif": "AVIF",
@@ -95,7 +96,7 @@ def _has_alpha(im: Image.Image) -> bool:
 
 
 def _flatten(im: Image.Image) -> Image.Image:
-    """Убираем прозрачность, подкладывая белый фон."""
+    """Remove transparency by putting a white background underneath."""
     if not _has_alpha(im):
         return im.convert("RGB")
     rgba = im.convert("RGBA")
@@ -105,7 +106,7 @@ def _flatten(im: Image.Image) -> Image.Image:
 
 
 def _square_icon(im: Image.Image) -> tuple[Image.Image, list[tuple[int, int]]]:
-    """ICO должен быть квадратным: вписываем картинку в прозрачный квадрат до 256px."""
+    """ICO must be square: fit the image into a transparent square of up to 256px."""
     side = min(256, max(im.size))
     canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
     thumb = im.convert("RGBA")
@@ -117,7 +118,7 @@ def _square_icon(im: Image.Image) -> tuple[Image.Image, list[tuple[int, int]]]:
 
 def _convert_image(src: Path, dst: Path, fmt: str) -> None:
     if fmt == "heic" and pillow_heif is None:
-        raise ConversionError("HEIC недоступен: не установлен pillow-heif")
+        raise ConversionError("HEIC unavailable: pillow-heif is not installed")
     try:
         with Image.open(src) as im:
             options = dict(_SAVE_OPTIONS.get(fmt, {}))
@@ -129,8 +130,8 @@ def _convert_image(src: Path, dst: Path, fmt: str) -> None:
             _save_image(ImageOps.exif_transpose(im), dst, fmt, options)
     except ConversionError:
         raise
-    except Exception as e:  # Pillow бросает самые разные исключения
-        raise ConversionError(f"Не удалось обработать изображение: {e}") from e
+    except Exception as e:  # Pillow raises all kinds of exceptions
+        raise ConversionError(f"Couldn't process the image: {e}") from e
 
 
 def _save_image(out: Image.Image, dst: Path, fmt: str, options: dict) -> None:
@@ -143,12 +144,12 @@ def _save_image(out: Image.Image, dst: Path, fmt: str, options: dict) -> None:
     out.save(dst, _PIL_FORMATS[fmt], **options)
 
 
-# ---------- Инструменты для изображений ----------
+# ---------- Image tools ----------
 
-# Что дописываем к имени копии: «фото (сжато).jpg»
+# Appended to the copy's name: "photo (compressed).jpg"
 TOOL_SUFFIXES = {
-    "compress": "сжато", "strip": "без метаданных", "trim": "обрезано", "half": "50%",
-    "rotate": "повёрнуто", "gray": "ч-б", "white_bg": "белый фон",
+    "compress": "compressed", "strip": "no metadata", "trim": "trimmed", "half": "50%",
+    "rotate": "rotated", "gray": "bw", "white_bg": "white bg",
 }
 _COMPRESS_OPTIONS = {
     "jpg": {"quality": 75, "optimize": True, "progressive": True},
@@ -164,24 +165,24 @@ _ICC_MODES = {"RGB", "RGBA", "L", "LA"}
 
 
 def apply_tool(src: Path, tool: str) -> Path:
-    """Изменённая копия картинки рядом с оригиналом, в том же формате."""
+    """A modified copy of the image next to the original, in the same format."""
     if formats.detect(src) != formats.IMAGE:
-        raise ConversionError("Инструменты работают только с изображениями")
+        raise ConversionError("Tools work only with images")
     if tool not in TOOL_SUFFIXES:
-        raise ConversionError("Неизвестный инструмент")
+        raise ConversionError("Unknown tool")
     ext = src.suffix.lower().lstrip(".")
     fmt = _EXT_ALIASES.get(ext, ext)
-    if fmt not in _PIL_FORMATS:  # PSD, TGA и PPM Pillow умеет только читать
+    if fmt not in _PIL_FORMATS:  # Pillow can only read PSD, TGA and PPM
         fmt = "png"
     if fmt == "heic" and pillow_heif is None:
-        raise ConversionError("HEIC недоступен: не установлен pillow-heif")
+        raise ConversionError("HEIC unavailable: pillow-heif is not installed")
 
     dst = free_path(src.with_name(f"{src.stem} ({TOOL_SUFFIXES[tool]}).{fmt}"))
 
     def write(tmp: Path) -> None:
         _apply_image_tool(src, tmp, fmt, tool)
         if tool == "compress" and tmp.stat().st_size >= src.stat().st_size:
-            raise ConversionError("Сильнее сжать не получилось: файл уже оптимизирован")
+            raise ConversionError("Couldn't compress further: the file is already optimized")
 
     _write_via_tmp(dst, write)
     return dst
@@ -191,22 +192,22 @@ def _apply_image_tool(src: Path, dst: Path, fmt: str, tool: str) -> None:
     try:
         with Image.open(src) as im:
             if getattr(im, "n_frames", 1) > 1:
-                raise ConversionError("Анимированные картинки инструменты пока не обрабатывают")
+                raise ConversionError("Tools don't support animated images yet")
             icc = im.info.get("icc_profile") if im.mode in _ICC_MODES else None
             upright = im.getexif().get(0x0112, 1) == 1
 
             if tool == "strip" and fmt == "jpg" and im.format == "JPEG" and upright:
-                # Пересжатие испортило бы картинку: сохраняем с исходными таблицами квантования
+                # Re-encoding would degrade the image: save with the original quantization tables
                 im.save(dst, "JPEG", quality="keep", subsampling="keep", icc_profile=icc)
                 return
 
             out = ImageOps.exif_transpose(im)
-            exif = out.getexif()  # поворот уже применён, ориентации в нём нет
+            exif = out.getexif()  # rotation is already applied, no orientation in it
             options = dict(_SAVE_OPTIONS.get(fmt, {}))
 
             if tool == "compress":
                 if fmt not in _COMPRESS_OPTIONS:
-                    raise ConversionError(f"{fmt.upper()} не сжимается: конвертируйте в PNG или JPG")
+                    raise ConversionError(f"{fmt.upper()} can't be compressed: convert it to PNG or JPG")
                 options = dict(_COMPRESS_OPTIONS[fmt])
                 if fmt == "png":
                     out = _quantize(out)
@@ -218,10 +219,10 @@ def _apply_image_tool(src: Path, dst: Path, fmt: str, tool: str) -> None:
                 out = out.transpose(Image.Transpose.ROTATE_270)
             elif tool == "gray":
                 out = out.convert("LA" if _has_alpha(out) else "L")
-                icc = None  # цветной профиль к серой картинке не подходит
+                icc = None  # a color profile doesn't fit a grayscale image
             elif tool == "white_bg":
                 if not _has_alpha(out):
-                    raise ConversionError("В картинке нет прозрачности")
+                    raise ConversionError("The image has no transparency")
                 out = _flatten(out)
 
             if icc and out.mode in _ICC_MODES:
@@ -234,18 +235,18 @@ def _apply_image_tool(src: Path, dst: Path, fmt: str, tool: str) -> None:
     except ConversionError:
         raise
     except Exception as e:
-        raise ConversionError(f"Не удалось обработать изображение: {e}") from e
+        raise ConversionError(f"Couldn't process the image: {e}") from e
 
 
 def _quantize(im: Image.Image) -> Image.Image:
-    """PNG сжимаем как TinyPNG: палитра из 256 цветов с дизерингом."""
+    """Compress PNG like TinyPNG does: a 256-color palette with dithering."""
     if _has_alpha(im):
         return im.convert("RGBA").quantize(256, method=Image.Quantize.FASTOCTREE)
     return im.convert("RGB").quantize(256, method=Image.Quantize.MEDIANCUT)
 
 
 def _trim(im: Image.Image) -> Image.Image:
-    """Обрезает прозрачные поля, а у непрозрачных картинок — поля цвета левого верхнего пикселя."""
+    """Trims transparent borders or, for opaque images, borders the color of the top-left pixel."""
     full = (0, 0, *im.size)
     box = None
     if _has_alpha(im):
@@ -255,13 +256,13 @@ def _trim(im: Image.Image) -> Image.Image:
         bg = Image.new("RGB", rgb.size, rgb.getpixel((0, 0)))
         box = ImageChops.difference(rgb, bg).convert("L").point(lambda v: 255 if v > 16 else 0).getbbox()
     if box is None:
-        raise ConversionError("Картинка однотонная, обрезать нечего")
+        raise ConversionError("The image is a solid color, nothing to trim")
     if box == full:
-        raise ConversionError("Полей не найдено")
+        raise ConversionError("No borders found")
     return im.crop(box)
 
 
-# ---------- Видео и аудио ----------
+# ---------- Video and audio ----------
 
 _EVEN_SIZE = ["-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2"]
 _H264 = ["-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p", *_EVEN_SIZE]
@@ -299,7 +300,7 @@ def _convert_media(
         ffmpeg_exe(), "-hide_banner", "-nostdin", "-y", "-i", str(src),
         *FFMPEG_ARGS[fmt], "-progress", "pipe:1", "-nostats", str(dst),
     ]
-    # Без этого флага на Windows на мгновение появляется чёрное окно консоли
+    # Without this flag a black console window flashes on Windows
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -325,13 +326,13 @@ def _convert_media(
         if line.startswith("out_time_us=") and duration:
             try:
                 on_progress(min(int(line.split("=", 1)[1]) / 1e6 / duration, 0.99))
-            except ValueError:  # бывает "N/A"
+            except ValueError:  # can be "N/A"
                 pass
         elif line and not _PROGRESS_LINE_RE.match(line):
             log_tail.append(line)
     proc.wait()
 
     if cancel.is_set():
-        raise ConversionError("Отменено")
+        raise ConversionError(CANCELLED)
     if proc.returncode != 0:
-        raise ConversionError(log_tail[-1] if log_tail else f"ffmpeg завершился с кодом {proc.returncode}")
+        raise ConversionError(log_tail[-1] if log_tail else f"ffmpeg exited with code {proc.returncode}")

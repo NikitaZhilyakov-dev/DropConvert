@@ -1,12 +1,12 @@
-"""Колесо форматов: всплывает у курсора вместо обычного меню.
+"""Format wheel: pops up at the cursor instead of a regular menu.
 
-Сектора-«лепестки» по кругу, наведённый подсвечивается и чуть выдвигается наружу,
-в центре плашка с названием формата. Управление мышью или клавиатурой
-(стрелки, Enter, цифры, Esc). У колеса может быть несколько страниц
-(«Конвертация», «Инструменты»): Tab листает их по кругу.
+Petal sectors around a circle; the hovered one lights up and moves outward slightly,
+with a pill showing the format name in the center. Works with the mouse or keyboard
+(arrows, Enter, digits, Esc). The wheel can have several pages
+("Convert", "Tools"): Tab cycles through them.
 
-Колесо умеет принимать перетаскиваемые файлы: их бросают прямо на сектор.
-Здесь же кольцо прогресса, в которое колесо сворачивается после выбора.
+The wheel accepts dragged files: they are dropped right onto a sector.
+This module also has the progress ring the wheel collapses into after a choice.
 """
 from __future__ import annotations
 
@@ -29,9 +29,9 @@ CENTER = "center"
 class WheelItem:
     label: str
     data: Any
-    hint: str = ""     # мелкая подпись под названием в секторе
-    caption: str = ""  # подпись под колесом при наведении
-    opens: bool = False  # открывает следующий набор секторов: при перетаскивании раскрывается сам
+    hint: str = ""     # small text under the label in the sector
+    caption: str = ""  # caption under the wheel on hover
+    opens: bool = False  # opens the next set of sectors: springs open by itself while dragging
 
 
 @dataclass(frozen=True)
@@ -83,24 +83,24 @@ def _ease_out_back(t: float) -> float:
 
 
 class FormatWheel(QWidget):
-    R_OUT = 150      # внешний радиус лепестков
-    R_IN = 70        # внутренний радиус лепестков
-    RIM = 12         # серый обод вокруг лепестков
+    R_OUT = 150      # outer petal radius
+    R_IN = 70        # inner petal radius
+    RIM = 12         # gray rim around the petals
     SHADOW = 26
-    CAPTION = 44     # место под подписи сверху и снизу
-    TABS = 40        # полоска страниц под нижней подписью
-    GAP = 6          # зазор между лепестками
-    CORNER = 13      # скругление лепестков
-    POP = 7          # насколько наведённый лепесток выдвигается наружу
+    CAPTION = 44     # room for the captions above and below
+    TABS = 40        # page strip under the bottom caption
+    GAP = 6          # gap between petals
+    CORNER = 13      # petal corner radius
+    POP = 7          # how far the hovered petal moves outward
     APPEAR_MS, CLOSE_MS, COLLAPSE_MS = 230, 140, 200
-    SPRING_MS = 500  # сколько держать файл над сектором с opens, чтобы он раскрылся
-    COLLAPSED = 0.16  # во сколько раз колесо сжимается перед тем, как стать кольцом прогресса
+    SPRING_MS = 500  # how long to hold a file over an opens sector for it to spring open
+    COLLAPSED = 0.16  # how small the wheel shrinks before turning into the progress ring
 
     def __init__(self, title: str) -> None:
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.NoDropShadowWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # Иначе на macOS окно-панель неактивного приложения прячется (колесо при перетаскивании)
+        # Otherwise macOS hides an inactive app's panel window (the wheel while dragging)
         self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -133,11 +133,11 @@ class FormatWheel(QWidget):
         self._timer = QTimer(self, interval=16, timeout=self._tick)
         self._spring = QTimer(self, singleShot=True, interval=self.SPRING_MS, timeout=self._spring_open)
 
-    # ----- Публичный интерфейс -----
+    # ----- Public interface -----
 
     def set_items(self, items: list[WheelItem], center_label: str, center_data: Any = None,
                   center_caption: str = "", idle_caption: str = "") -> None:
-        """Новый набор секторов (например, после выбора категории) с повтором анимации появления."""
+        """A new set of sectors (e.g. after choosing a category), replaying the appear animation."""
         self.items = items
         self.center_label, self.center_data = center_label, center_data
         self.center_caption, self.idle_caption = center_caption, idle_caption
@@ -149,17 +149,17 @@ class FormatWheel(QWidget):
         self.update()
 
     def set_pages(self, pages: list[str], page: int) -> None:
-        """Названия страниц для полоски внизу; одна страница — полоски нет."""
+        """Page names for the strip at the bottom; with a single page there is no strip."""
         self.pages, self.page = pages, page
         self.update()
 
     def switch_page(self, step: int) -> None:
-        """Листает страницы: choose() вернёт ("page", номер), набор секторов задаёт вызывающий."""
+        """Switches pages: choose() returns ("page", index), the caller sets the new sectors."""
         if len(self.pages) > 1 and not self._closing:
             self._finish(("page", (self.page + step) % len(self.pages)))
 
     def accept_files(self, on_files: Callable[[list[Path]], None]) -> None:
-        """Колесо принимает перетаскиваемые файлы; on_files узнаёт, что тащат, ещё до броска."""
+        """The wheel accepts dragged files; on_files learns what is dragged before the drop."""
         self._on_files = on_files
         self.setAcceptDrops(True)
 
@@ -170,9 +170,9 @@ class FormatWheel(QWidget):
         return self.mapToGlobal(self._center().toPoint())
 
     def popup(self, pos: QPoint, activate: bool = True) -> None:
-        """Показывает колесо центром в точке pos, не вылезая за край экрана.
+        """Shows the wheel centered on pos, keeping it within the screen.
 
-        Без activate окно не забирает фокус: так колесо открывается посреди перетаскивания.
+        Without activate the window doesn't take focus: that's how it opens mid-drag.
         """
         screen = QGuiApplication.screenAt(pos) or QGuiApplication.primaryScreen()
         area = screen.availableGeometry()
@@ -188,7 +188,7 @@ class FormatWheel(QWidget):
         self._update_hover(self.mapFromGlobal(QCursor.pos()))
 
     def choose(self, timeout_ms: int = 0) -> Any:
-        """Ждёт выбора. Возвращает data выбранного сектора или None, если колесо закрыли."""
+        """Waits for a choice. Returns the chosen sector's data, or None if the wheel was closed."""
         self._result = None
         self._done = False
         self._loop = QEventLoop()
@@ -199,7 +199,7 @@ class FormatWheel(QWidget):
         return self._result
 
     def close_animated(self, collapse: bool = False) -> None:
-        """collapse — колесо сжимается в точку, где появится кольцо прогресса."""
+        """collapse: the wheel shrinks to the point where the progress ring will appear."""
         self._closing = True
         self._collapse = collapse
         self._close.start()
@@ -209,7 +209,7 @@ class FormatWheel(QWidget):
         self._timer.stop()
         self.close()
 
-    # ----- Геометрия -----
+    # ----- Geometry -----
 
     def _close_ms(self) -> int:
         return self.COLLAPSE_MS if self._collapse else self.CLOSE_MS
@@ -218,15 +218,15 @@ class FormatWheel(QWidget):
         return QPointF(self.width() / 2, self.CAPTION + (self.width()) / 2)
 
     def _angles(self, i: int, n: int) -> tuple[float, float]:
-        """Середина и ширина сектора в градусах; 0-й сектор сверху, дальше по часовой."""
+        """Sector middle and width in degrees; sector 0 is at the top, then clockwise."""
         span = 360 / n
         return -90 + i * span, span
 
     def _petal_path(self, i: int, n: int) -> QPainterPath:
-        """Кольцевой сектор со скруглёнными углами (в координатах с центром колеса в нуле).
+        """An annular sector with rounded corners (in coordinates with the wheel center at zero).
 
-        Строим сектор, ужатый на радиус скругления, и обводим его круглой кистью:
-        объединение даёт ровный зазор и мягкие углы без ручной геометрии дуг.
+        Build the sector shrunk by the corner radius and stroke it with a round pen:
+        the union gives an even gap and soft corners without hand-made arc geometry.
         """
         mid, span = self._angles(i, n)
         c = self.CORNER
@@ -259,7 +259,7 @@ class FormatWheel(QWidget):
         span = 360 / len(self.items)
         return int(((angle + 90 + span / 2) % 360) // span)
 
-    # ----- Анимация -----
+    # ----- Animation -----
 
     def _tick(self) -> None:
         for key in [*range(len(self.items)), CENTER]:
@@ -269,12 +269,12 @@ class FormatWheel(QWidget):
         self.update()
 
     def _progress(self) -> tuple[float, float]:
-        """(появление 0..1, закрытие 0..1)."""
+        """(appear 0..1, close 0..1)."""
         appear = min(1.0, self._appear.elapsed() / self.APPEAR_MS) if self._appear.isValid() else 1.0
         close = min(1.0, self._close.elapsed() / self._close_ms()) if self._closing else 0.0
         return appear, close
 
-    # ----- Рисование -----
+    # ----- Painting -----
 
     def paintEvent(self, _event) -> None:
         t = _theme()
@@ -285,7 +285,7 @@ class FormatWheel(QWidget):
         scale = 0.8 + 0.2 * _ease_out_back(appear)
         if self._collapse:
             scale *= 1 - (1 - self.COLLAPSED) * _ease_in_cubic(close)
-            fade = 1 - max(0.0, close - 0.5) * 2  # гаснет только под конец, когда уже маленькое
+            fade = 1 - max(0.0, close - 0.5) * 2  # fades only at the end, once it is small
         else:
             scale -= 0.06 * close
             fade = 1 - close
@@ -300,7 +300,7 @@ class FormatWheel(QWidget):
         p.restore()
 
         if self._collapse:
-            p.setOpacity(p.opacity() * (1 - close))  # подписи исчезают сразу
+            p.setOpacity(p.opacity() * (1 - close))  # captions disappear right away
         self._paint_caption(p, t, self.title, QPointF(c.x(), self.CAPTION / 2 + 2), bold=True)
         self._paint_caption(p, t, self._bottom_caption(),
                             QPointF(c.x(), self.height() - self.TABS - self.CAPTION / 2 - 2))
@@ -335,11 +335,11 @@ class FormatWheel(QWidget):
         p.drawPath(self._paths[i])
 
         n = len(self.items)
-        # Ширина подписи по хорде сектора: у двух-трёх широких секторов влезает «Изображения»
+        # Label width along the sector chord: two or three wide sectors fit "Images"
         width = min(170.0, 2 * label_r * math.sin(math.radians(min(180 / n, 90))) - 16)
         font = QFont()
         font.setWeight(QFont.Weight.Bold)
-        # Длинные подписи вроде «Уменьшить» сначала уменьшаем и только потом обрезаем
+        # Long labels like "Compress" shrink first and only then get elided
         for size in range(17 if n <= 7 else 15 if n <= 9 else 14, 11, -1):
             font.setPixelSize(size)
             if QFontMetricsF(font).horizontalAdvance(item.label) <= width:
@@ -371,7 +371,7 @@ class FormatWheel(QWidget):
         g = self.glow.get(CENTER, 0.0) if self.center_data is not None else 0.0
         font = QFont()
         font.setWeight(QFont.Weight.DemiBold)
-        # Длинное слово вроде «Изображения» сначала уменьшаем и только потом обрезаем
+        # A long word like "Images" shrinks first and only then gets elided
         for size in (14, 13, 12, 11):
             font.setPixelSize(size)
             metrics = QFontMetricsF(font)
@@ -398,7 +398,7 @@ class FormatWheel(QWidget):
         return self.idle_caption
 
     def _paint_caption(self, p: QPainter, t: _Theme, text: str, at: QPointF, bold: bool = False) -> None:
-        """Подпись на плашке: колесо висит поверх чего угодно, голый серый текст не прочитать."""
+        """Caption on a pill: the wheel floats over anything, bare gray text would be unreadable."""
         if not text:
             return
         font = QFont()
@@ -419,7 +419,7 @@ class FormatWheel(QWidget):
         p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
 
     def _paint_pages(self, p: QPainter, t: _Theme, at: QPointF) -> None:
-        """Полоска страниц: текущая залита акцентом, справа подсказка «Tab»."""
+        """Page strip: the current page is filled with the accent, a "Tab" hint on the right."""
         self._page_rects = []
         if len(self.pages) < 2:
             return
@@ -462,7 +462,7 @@ class FormatWheel(QWidget):
         p.setPen(t.muted)
         p.drawText(key, Qt.AlignmentFlag.AlignCenter, "Tab")
 
-    # ----- Ввод -----
+    # ----- Input -----
 
     def _update_hover(self, pos: QPointF | QPoint) -> None:
         hover = self._hit(QPointF(pos))
@@ -488,7 +488,7 @@ class FormatWheel(QWidget):
             self._finish(self.items[key].data)
 
     def _finish(self, result: Any) -> None:
-        # Повторный вызов до выхода из цикла (бросок и тут же таймер отмены) результат не перетирает
+        # A second call before the loop exits (a drop, then the cancel timer) doesn't overwrite the result
         if self._loop is None or self._done:
             return
         self._done = True
@@ -515,7 +515,7 @@ class FormatWheel(QWidget):
                 return
         key = self._hit(event.position())
         if key is None:
-            self._finish(None)  # щелчок мимо колеса
+            self._finish(None)  # click outside the wheel
         else:
             self._select(key)
 
@@ -538,7 +538,7 @@ class FormatWheel(QWidget):
         else:
             super().keyPressEvent(event)
 
-    # ----- Перетаскивание -----
+    # ----- Dragging -----
 
     def dragEnterEvent(self, event) -> None:
         paths = [Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()]
@@ -564,11 +564,11 @@ class FormatWheel(QWidget):
         before = self.hover
         self._update_hover(event.position())
         if self.hover != before:
-            # Как папки в Finder: задержали файл над «Изображениями» — раскрылись форматы
+            # Like folders in Finder: hold the file over "Images" and the formats spring open
             opens = isinstance(self.hover, int) and self.items[self.hover].opens
             self._spring.start() if opens else self._spring.stop()
         if self.hover is None:
-            event.ignore()  # мимо сектора: курсор «нельзя», файл вернётся на место
+            event.ignore()  # not over a sector: "not allowed" cursor, the file goes back
         else:
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
@@ -579,13 +579,13 @@ class FormatWheel(QWidget):
         if self.hover is None or self.items_opens(self.hover):
             event.ignore()
             return
-        # Копирование: Finder и Проводник ничего не сделают с исходным файлом
+        # Copy: Finder and File Explorer leave the source file untouched
         event.setDropAction(Qt.DropAction.CopyAction)
         event.accept()
         self._select(self.hover)
 
     def event(self, event) -> bool:
-        # Ушёл фокус (щелчок в другом окне, ⌘Tab) — закрываемся, как обычное меню
+        # Focus lost (click in another window, ⌘Tab): close like a regular menu
         if event.type() == QEvent.Type.WindowActivate:
             self._was_active = True
         elif event.type() == QEvent.Type.WindowDeactivate and self._was_active and not self._closing:
@@ -595,14 +595,14 @@ class FormatWheel(QWidget):
 
 
 class ProgressRing(QWidget):
-    """Кружок у курсора: процент конвертации, в конце галочка (или «!», если были ошибки).
+    """A circle at the cursor: conversion percent, then a checkmark (or "!" on errors).
 
-    Следует за курсором с небольшим запаздыванием и не мешает щелчкам.
+    Follows the cursor with a slight lag and doesn't block clicks.
     """
 
-    R = 15                      # радиус дуги прогресса
-    DISC = 22                   # радиус подложки
-    OFFSET = QPointF(30, 30)    # смещение от кончика курсора
+    R = 15                      # progress arc radius
+    DISC = 22                   # backing disc radius
+    OFFSET = QPointF(30, 30)    # offset from the cursor tip
     APPEAR_MS, HOLD_MS, FADE_MS = 160, 900, 260
 
     def __init__(self) -> None:
@@ -618,8 +618,8 @@ class ProgressRing(QWidget):
         self.value = 0.0
         self.state = "progress"  # progress | done | error
         self._pos = QPointF()
-        self._clock = QElapsedTimer()   # с момента появления
-        self._ended = QElapsedTimer()   # с момента завершения
+        self._clock = QElapsedTimer()   # since appearing
+        self._ended = QElapsedTimer()   # since finishing
         self._timer = QTimer(self, interval=16, timeout=self._tick)
 
     @property
@@ -627,7 +627,7 @@ class ProgressRing(QWidget):
         return self.isVisible() and self.state == "progress"
 
     def start(self, at: QPoint) -> None:
-        """Появляется в точке at (там, куда свернулось колесо) и отъезжает к курсору."""
+        """Appears at `at` (where the wheel collapsed) and glides to the cursor."""
         if not self.isVisible() or self.state != "progress":
             self._pos = QPointF(at)
             self._clock.start()
@@ -671,7 +671,7 @@ class ProgressRing(QWidget):
         p.translate(self.width() / 2, self.height() / 2)
         p.scale(0.85 + 0.15 * appear, 0.85 + 0.15 * appear)
 
-        # Подложка с тенью, как у колеса
+        # Backing disc with a shadow, like the wheel
         shadow = QRadialGradient(QPointF(0, 2), self.DISC + 8)
         shadow.setColorAt(self.DISC / (self.DISC + 8) - 0.1, QColor(0, 0, 0, 60))
         shadow.setColorAt(1.0, QColor(0, 0, 0, 0))
@@ -694,7 +694,7 @@ class ProgressRing(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(ring)
             p.setPen(QPen(t.accent, 3.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            if self.value < 0.01:  # длительность ещё неизвестна: крутящийся отрезок
+            if self.value < 0.01:  # duration unknown yet: a spinning arc
                 start = -self._clock.elapsed() * 0.4
                 p.drawArc(ring, int(start * 16), int(-90 * 16))
             else:
@@ -707,7 +707,7 @@ class ProgressRing(QWidget):
                 p.drawText(ring, Qt.AlignmentFlag.AlignCenter, f"{int(self.value * 100)}")
             return
 
-        # Галочка прорисовывается штрихом, «!» просто проявляется
+        # The checkmark draws in as a stroke, "!" just fades in
         draw = min(1.0, max(0.0, (ended - 80) / 220))
         p.setPen(QPen(t.accent_text, 3.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
                       Qt.PenJoinStyle.RoundJoin))

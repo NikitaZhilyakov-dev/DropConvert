@@ -1,57 +1,57 @@
 # DropConvert
 
-Конвертер файлов с drag & drop для macOS и Windows. Перетащите файлы (или папку) в окно, нажмите нужный формат, и результат появится рядом с оригиналом. Оригинал не изменяется, существующие файлы не перезаписываются: если имя занято, к нему добавляется « (1)».
+A drag & drop file converter for macOS and Windows. Drop files (or a folder) into the window, click a format, and the result appears next to the original. The original is never changed and existing files are never overwritten: if a name is taken, " (1)" is appended.
 
-| Что | Откуда | Во что |
+| What | From | To |
 |---|---|---|
-| Изображения | PNG, JPG, WEBP, HEIC, AVIF, GIF, BMP, TIFF, ICO, TGA, PSD | PNG, JPG, WEBP, HEIC, AVIF, GIF, BMP, TIFF, ICO, PDF |
-| Видео | MP4, MOV, MKV, WEBM, AVI, WMV, FLV, MPG, 3GP, TS | MP4, MOV, MKV, WEBM, AVI, GIF, а также MP3, WAV, M4A (извлечь звук) |
-| Аудио | MP3, WAV, FLAC, OGG, M4A, AAC, WMA, OPUS, AIFF, AMR | MP3, WAV, FLAC, OGG, M4A, OPUS |
+| Images | PNG, JPG, WEBP, HEIC, AVIF, GIF, BMP, TIFF, ICO, TGA, PSD | PNG, JPG, WEBP, HEIC, AVIF, GIF, BMP, TIFF, ICO, PDF |
+| Video | MP4, MOV, MKV, WEBM, AVI, WMV, FLV, MPG, 3GP, TS | MP4, MOV, MKV, WEBM, AVI, GIF, plus MP3, WAV, M4A (extract audio) |
+| Audio | MP3, WAV, FLAC, OGG, M4A, AAC, WMA, OPUS, AIFF, AMR | MP3, WAV, FLAC, OGG, M4A, OPUS |
 
-## Работа из строки меню
+## Working from the menu bar
 
-DropConvert живёт в строке меню (macOS) или в трее (Windows) и работает без окна:
+DropConvert lives in the menu bar (macOS) or the tray (Windows) and works without a window:
 
-1. В Finder / Проводнике зажмите **⌘** (macOS) или **Alt** (Windows) и щёлкните правой кнопкой по файлу. Если выделено несколько файлов, меню откроется для всего выделения.
-2. У курсора раскроется колесо с форматами, подходящими для этих файлов; обычное контекстное меню при этом не появляется. Если выделены файлы разных типов (например, картинки и видео), сначала выберите тип.
-3. Щёлкните по сектору с нужным форматом. С клавиатуры: стрелки и Enter, цифры 1–9 или Esc, чтобы закрыть. Щелчок по центру колеса открывает файлы в окне DropConvert.
-4. Колесо свернётся в кольцо прогресса у курсора: в нём виден процент, а в конце появится галочка (или «!», если что-то не получилось). Ещё придёт уведомление; щелчок по нему покажет результат.
+1. In Finder / File Explorer, hold **⌘** (macOS) or **Alt** (Windows) and right-click a file. If several files are selected, the menu opens for the whole selection.
+2. A wheel with formats that fit these files opens at the cursor; the regular context menu doesn't appear. If the selection mixes file types (say, images and video), pick the type first.
+3. Click the sector with the format you want. From the keyboard: arrows and Enter, digits 1–9, or Esc to close. Clicking the center of the wheel opens the files in the DropConvert window.
+4. The wheel collapses into a progress ring at the cursor: it shows the percentage and ends with a checkmark (or "!" if something failed). A notification also arrives; clicking it shows the result.
 
-**Колесо при перетаскивании.** Начните перетаскивать файл (из Finder, Проводника, с рабочего стола) и, не отпуская кнопку, нажмите **Tab**. Под курсором раскроется колесо; бросьте файл на нужный сектор. Если отпустить мимо колеса или нажать Esc, колесо закроется, а файл останется на месте. Если тащите файлы разных типов, задержите их над сектором типа («Изображения», «Видео»), и он раскроется в форматы.
+**Wheel while dragging.** Start dragging a file (from Finder, File Explorer or the desktop) and, without releasing the button, press **Tab**. The wheel opens under the cursor; drop the file on the sector you want. If you release outside the wheel or press Esc, the wheel closes and the file stays where it was. When dragging files of different types, hold them over a type sector ("Images", "Video") and it springs open into formats.
 
-**Tab листает колёса.** Если среди файлов есть картинки, кроме колеса «Конвертация» есть колесо «Инструменты». Tab открывает следующее колесо, Shift+Tab предыдущее; это работает и при перетаскивании, и в колесе по ⌘ / Alt + правому щелчку. Текущее колесо подсвечено в полоске под ним.
+**Tab cycles wheels.** If the files include images, there is a "Tools" wheel besides "Convert". Tab opens the next wheel, Shift+Tab the previous one; this works both while dragging and in the ⌘ / Alt + right-click wheel. The current wheel is highlighted in the strip below it.
 
-Инструменты для картинок не меняют формат и кладут результат рядом, например `фото (сжато).jpg`:
+Image tools keep the format and put the result alongside, e.g. `photo (compressed).jpg`:
 
-| Инструмент | Что делает |
+| Tool | What it does |
 |---|---|
-| Сжать | JPG, WEBP, HEIC, AVIF пересжимает с меньшим качеством, PNG переводит в палитру из 256 цветов. Если файл не стал меньше, копия не создаётся |
-| Очистить метаданные | убирает EXIF, геопозицию и т.п.; поворот из EXIF применяется к картинке. Обычный JPEG сохраняется без пересжатия |
-| Обрезать | срезает прозрачные или однотонные поля по краям |
-| Уменьшить | вдвое по каждой стороне |
-| Повернуть | на 90° по часовой стрелке |
-| Ч/Б | оттенки серого |
-| Фон | заменяет прозрачность белым |
+| Compress | re-encodes JPG, WEBP, HEIC, AVIF at lower quality; turns PNG into a 256-color palette. If the file doesn't get smaller, no copy is made |
+| Strip metadata | removes EXIF, location and the like; EXIF rotation is applied to the image. A plain JPEG is saved without re-encoding |
+| Trim | cuts transparent or solid-color borders |
+| Shrink | halves each side |
+| Rotate | 90° clockwise |
+| B&W | grayscale |
+| Fill | replaces transparency with white |
 
-Все инструменты, кроме очистки, сохраняют EXIF (дату съёмки, камеру). Анимированные GIF и WEBP инструменты пока не обрабатывают.
+All tools except Strip keep EXIF (capture date, camera). Animated GIF and WEBP aren't supported by the tools yet.
 
-В меню значка включается запуск при входе в систему. Закрытое окно не завершает программу; выйти можно через меню значка.
+Launch at login can be turned on from the icon's menu. Closing the window doesn't quit the app; quit from the icon's menu.
 
-macOS попросит два разрешения:
-- **Универсальный доступ** — чтобы перехватывать ⌘ + правый щелчок и Tab при перетаскивании. Запрос появится при первом запуске; включите DropConvert в «Системные настройки → Конфиденциальность и безопасность → Универсальный доступ». Перезапускать программу не нужно. Приложение не подписано, поэтому после каждой пересборки macOS считает его новым: выключите и снова включите переключатель.
-- **Автоматизация Finder** — чтобы узнать, какие файлы выделены. Запрос появится при первом щелчке.
+macOS asks for two permissions:
+- **Accessibility**, to intercept ⌘ + right-click and Tab while dragging. The prompt appears on first launch; enable DropConvert in System Settings → Privacy & Security → Accessibility. No restart needed. The app isn't signed, so after every rebuild macOS treats it as a new app: turn the switch off and on again.
+- **Finder automation**, to learn which files are selected. The prompt appears on the first click.
 
-Пока зажата левая кнопка мыши и мышь сдвинулась, Tab не доходит до приложений: DropConvert забирает его себе.
+While the left mouse button is held and the mouse has moved, Tab doesn't reach applications: DropConvert takes it.
 
-Ограничения на Windows: выделение берётся из активного окна Проводника, файлы на рабочем столе пока не поддерживаются; если в окне Проводника несколько вкладок, используется первая.
+Windows limitations: the selection comes from the active File Explorer window, files on the desktop aren't supported yet; if the File Explorer window has several tabs, the first one is used.
 
-Что ещё умеет:
-- можно бросить файлы на иконку в Dock (macOS) или на `.exe` / ярлык (Windows);
-- показывает прогресс конвертации видео и аудио;
-- двойной клик по строке открывает файл в Finder или Проводнике;
-- переключатель «Поверх окон» оставляет окно над остальными, удобно перетаскивать с рабочего стола.
+Also:
+- you can drop files on the Dock icon (macOS) or on the `.exe` / a shortcut (Windows);
+- shows conversion progress for video and audio;
+- double-clicking a row shows the file in Finder or File Explorer;
+- the "Stay on top" toggle keeps the window above others, handy for dragging from the desktop.
 
-## Запуск из исходников
+## Running from source
 
 ```bash
 python3 -m venv .venv
@@ -59,37 +59,37 @@ python3 -m venv .venv
 .venv/bin/python main.py
 ```
 
-Отдельно ставить ffmpeg не нужно: его бинарник для вашей платформы поставляется в пакете `imageio-ffmpeg`.
+No separate ffmpeg install is needed: a binary for your platform ships in the `imageio-ffmpeg` package.
 
-## Сборка
+## Building
 
-PyInstaller не умеет собирать под другую ОС, поэтому каждую версию собирают на своей системе:
+PyInstaller can't cross-compile, so each version is built on its own OS:
 
 - **macOS:** `./build_mac.sh` → `dist/DropConvert.app`
-- **Windows:** `build_windows.bat` → папка `dist\DropConvert\` с `DropConvert.exe`
+- **Windows:** `build_windows.bat` → `dist\DropConvert\` folder with `DropConvert.exe`
 
-Без подписи macOS при первом запуске предупредит о неизвестном разработчике (откройте через правый клик → «Открыть»), а Windows покажет SmartScreen. Для распространения нужны Apple Developer ID с нотаризацией и сертификат подписи кода для Windows.
+Unsigned, macOS warns about an unidentified developer on first launch (open it via right-click → Open), and Windows shows SmartScreen. Distribution needs an Apple Developer ID with notarization and a Windows code signing certificate.
 
-## Тесты
+## Tests
 
 ```bash
 .venv/bin/python -m pytest
 ```
 
-## Структура
+## Layout
 
 ```
-main.py                    точка входа
-dropconvert/formats.py     какие форматы поддерживаются
-dropconvert/converters.py  конвертация (Pillow + ffmpeg) и инструменты для картинок
-dropconvert/app.py         окно с drag & drop (PySide6)
-dropconvert/agent.py       значок в строке меню, что показывает колесо (страницы, инструменты), один экземпляр
-dropconvert/wheel.py       колесо (рисование, анимация, мышь, клавиатура, бросок файла) и кольцо прогресса
-dropconvert/trigger.py     перехват ⌘ / Alt + правого щелчка и Tab при перетаскивании (CGEventTap / хуки WH_*_LL)
-dropconvert/system.py      выделение в Finder / Проводнике, автозапуск, Dock
-DropConvert.spec           конфиг сборки PyInstaller
+main.py                    entry point
+dropconvert/formats.py     supported formats
+dropconvert/converters.py  conversion (Pillow + ffmpeg) and image tools
+dropconvert/app.py         drag & drop window (PySide6)
+dropconvert/agent.py       menu bar icon, what the wheel shows (pages, tools), single instance
+dropconvert/wheel.py       the wheel (painting, animation, mouse, keyboard, drops) and the progress ring
+dropconvert/trigger.py     intercepting ⌘ / Alt + right-click and Tab while dragging (CGEventTap / WH_*_LL hooks)
+dropconvert/system.py      Finder / File Explorer selection, launch at login, Dock
+DropConvert.spec           PyInstaller build config
 ```
 
-Чтобы добавить инструмент, допишите его в `TOOLS` в `formats.py`, в `TOOL_SUFFIXES` и `_apply_image_tool` в `converters.py` и подпись в `_TOOLS` в `agent.py`.
+To add a tool, add it to `TOOLS` in `formats.py`, to `TOOL_SUFFIXES` and `_apply_image_tool` in `converters.py`, and its labels to `_TOOLS` in `agent.py`.
 
-Чтобы добавить формат, допишите его в `TARGETS` в `formats.py` и задайте параметры в `_PIL_FORMATS` (изображения) или `FFMPEG_ARGS` (видео и аудио) в `converters.py`.
+To add a format, add it to `TARGETS` in `formats.py` and set its options in `_PIL_FORMATS` (images) or `FFMPEG_ARGS` (video and audio) in `converters.py`.

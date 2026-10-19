@@ -64,13 +64,13 @@ def test_drop_on_tools_page(app, files):
     data = mime(*files)
     enter = QDragEnterEvent(pos.toPoint(), ACTIONS, data, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     app.sendEvent(wheel, enter)
-    assert enter.isAccepted() and wheel.title == "2 файла"
+    assert enter.isAccepted() and wheel.title == "2 files"
 
     def drop():
         event = QDropEvent(pos, ACTIONS, data, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
         app.sendEvent(wheel, event)
         assert event.isAccepted() and event.dropAction() == Qt.DropAction.CopyAction
-        wheel.cancel()  # запоздалая отмена после броска результат не меняет
+        wheel.cancel()  # a late cancel after the drop doesn't change the result
 
     QTimer.singleShot(0, lambda: wheel.switch_page(1))  # Tab
     QTimer.singleShot(20, drop)
@@ -95,7 +95,7 @@ def test_drag_end_without_drop_closes(app):
 
 
 def test_mixed_files_spring_open_category(app, files):
-    """Картинка и видео: задержка над «Изображениями» раскрывает форматы, бросок на сам тип не тратится."""
+    """Image and video: holding over "Images" springs open the formats; a drop on the type itself is ignored."""
     wheel, session = drag_wheel(app)
     pos = top_sector(wheel)
     data = mime(*files)
@@ -106,13 +106,13 @@ def test_mixed_files_spring_open_category(app, files):
     assert not early.isAccepted()
 
     def drop_on_format():
-        assert wheel.items[0].data == ("image", "jpg")  # PNG пропущен: файл уже в нём
+        assert wheel.items[0].data == ("image", "jpg")  # PNG skipped: the file is already in it
         event = QDropEvent(pos, ACTIONS, data, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
         app.sendEvent(wheel, event)
 
-    app.sendEvent(wheel, QDragLeaveEvent())  # файл увели и вернули
+    app.sendEvent(wheel, QDragLeaveEvent())  # the file was moved away and back
     app.sendEvent(wheel, QDragEnterEvent(pos.toPoint(), ACTIONS, data,
                                          Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
     QTimer.singleShot(wheel.SPRING_MS + 100, drop_on_format)
-    QTimer.singleShot(3000, wheel.cancel)  # чтобы тест не завис, если раскрытие не сработает
+    QTimer.singleShot(3000, wheel.cancel)  # so the test doesn't hang if spring-open fails
     assert session.run() == ("image", "jpg")

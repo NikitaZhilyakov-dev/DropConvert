@@ -1,12 +1,12 @@
-"""Вызов меню жестом: ⌘ + правый щелчок на macOS, Alt + правый щелчок на Windows.
+"""Opening the menu with a gesture: ⌘ + right-click on macOS, Alt + right-click on Windows.
 
-Щелчок перехватывается до того, как его получит Finder или Проводник, поэтому
-их собственное контекстное меню не открывается. На macOS для этого нужен
-«Универсальный доступ»: без него система не даёт перехватывать события мыши.
+The click is intercepted before Finder or File Explorer gets it, so their own
+context menu doesn't open. On macOS this needs Accessibility access: without it
+the system doesn't allow intercepting mouse events.
 
-Второй жест — Tab во время перетаскивания: пока зажата левая кнопка и мышь
-сдвинулась, Tab не доходит до приложений, а открывает колесо (и листает его
-страницы). Отпущенная кнопка или Esc означают конец перетаскивания.
+The second gesture is Tab while dragging: while the left button is held and the
+mouse has moved, Tab doesn't reach applications but opens the wheel (and switches
+its pages). A released button or Esc means the drag is over.
 """
 from __future__ import annotations
 
@@ -16,18 +16,18 @@ import threading
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-GESTURE = "⌘ + правый щелчок" if sys.platform == "darwin" else "Alt + правый щелчок"
-DRAG_GESTURE = "Tab при перетаскивании файла"
-_DRAG_THRESHOLD = 6  # на сколько пикселей сдвинуть мышь, чтобы это считалось перетаскиванием
+GESTURE = "⌘ + right-click" if sys.platform == "darwin" else "Alt + right-click"
+DRAG_GESTURE = "Tab while dragging a file"
+_DRAG_THRESHOLD = 6  # how many pixels the mouse must move to count as a drag
 
 
 class MouseTrigger(QObject):
-    # Координаты щелчка в системе координат ОС; нужны, чтобы при пустом выделении щёлкнуть туда же
+    # Click coordinates in OS coordinates; used to click the same spot when nothing is selected
     activated = Signal(float, float)
-    ready = Signal()  # перехват заработал после того, как пользователь выдал разрешение
-    # Сигналы перетаскивания приходят из потока перехватчика: подключать с QueuedConnection
-    drag_key = Signal(int)  # Tab (+1) или Shift+Tab (-1) во время перетаскивания
-    drag_ended = Signal()   # кнопку отпустили или нажали Esc
+    ready = Signal()  # interception started working after the user granted permission
+    # Drag signals come from the tap thread: connect with QueuedConnection
+    drag_key = Signal(int)  # Tab (+1) or Shift+Tab (-1) while dragging
+    drag_ended = Signal()   # button released or Esc pressed
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -37,7 +37,7 @@ class MouseTrigger(QObject):
             self._backend = _WinHook(self._fire, self.drag_key.emit, self.drag_ended.emit)
         else:
             self._backend = None
-        # Разрешение можно выдать в любой момент, поэтому пробуем включиться, пока не выйдет
+        # Permission can be granted at any moment, so keep trying to start until it works
         self._retry = QTimer(self, interval=2000, timeout=self._try_start)
 
     @property
@@ -75,13 +75,13 @@ class MouseTrigger(QObject):
             self._backend.ask_permission()
 
     def click(self, x: float, y: float) -> None:
-        """Обычный левый щелчок в точке жеста, чтобы выделить файл под курсором."""
+        """A plain left click at the gesture point to select the file under the cursor."""
         if self._backend is not None:
             self._backend.click(x, y)
 
     def _fire(self, x: float, y: float) -> None:
-        # Перехватчик должен вернуть управление сразу, иначе система его отключит
-        # (а на Windows ещё и подвиснет мышь), поэтому меню показываем уже после
+        # The tap must return right away or the system disables it
+        # (and on Windows the mouse stalls), so the menu is shown afterwards
         QTimer.singleShot(0, lambda: self.activated.emit(x, y))
 
 
@@ -92,7 +92,7 @@ class _CGPoint(ctypes.Structure):
 
 
 _RIGHT_DOWN, _RIGHT_UP, _LEFT_DOWN, _LEFT_UP, _LEFT_DRAGGED, _KEY_DOWN = 3, 4, 1, 2, 6, 10
-_TAP_DISABLED = (0xFFFFFFFE, 0xFFFFFFFF)  # по таймауту и пользователем
+_TAP_DISABLED = (0xFFFFFFFE, 0xFFFFFFFF)  # by timeout and by the user
 _FLAG_SHIFT, _FLAG_CONTROL, _FLAG_OPTION, _FLAG_COMMAND = 0x20000, 0x40000, 0x80000, 0x100000
 _FIELD_AUTOREPEAT, _FIELD_KEYCODE = 8, 9
 _KEY_TAB, _KEY_ESCAPE = 48, 53
@@ -133,10 +133,10 @@ class _MacTap:
         self._swallow_up = False
         self._tap = None
         self._source = None
-        self._handler = self._CALLBACK(self._on_event)  # ссылку держим, иначе её соберёт сборщик мусора
+        self._handler = self._CALLBACK(self._on_event)  # keep a reference, or the garbage collector frees it
 
-        # Перетаскивание слушаем отдельным перехватчиком в своём потоке: через него идут все
-        # нажатия клавиш в системе, и занятый главный поток Qt не должен их задерживать
+        # Dragging is watched by a separate tap on its own thread: every key press in the system
+        # goes through it, and a busy Qt main thread must not delay them
         self._on_drag_key, self._on_drag_end = on_drag_key, on_drag_end
         self._drag_handler = self._CALLBACK(self._on_drag_event)
         self._drag_thread: threading.Thread | None = None
@@ -150,7 +150,7 @@ class _MacTap:
         return self._tap is not None
 
     def ask_permission(self) -> None:
-        """Показывает системный запрос «Универсального доступа», если его ещё нет."""
+        """Shows the system Accessibility prompt if access isn't granted yet."""
         cf = self._cf
         cf.CFDictionaryCreate.restype = ctypes.c_void_p
         cf.CFDictionaryCreate.argtypes = [
@@ -172,9 +172,9 @@ class _MacTap:
         if self._tap:
             return True
         mask = (1 << _RIGHT_DOWN) | (1 << _RIGHT_UP)
-        # kCGSessionEventTap = 1, kCGHeadInsertEventTap = 0, kCGEventTapOptionDefault = 0 (может глотать события)
+        # kCGSessionEventTap = 1, kCGHeadInsertEventTap = 0, kCGEventTapOptionDefault = 0 (can swallow events)
         tap = self._cg.CGEventTapCreate(1, 0, 0, mask, self._handler, None)
-        if not tap:  # нет «Универсального доступа»
+        if not tap:  # no Accessibility access
             return False
         self._tap = tap
         self._source = self._cf.CFMachPortCreateRunLoopSource(None, tap, 0)
@@ -196,7 +196,7 @@ class _MacTap:
         cf.CFRunLoopAddSource(self._drag_loop, source, ctypes.c_void_p.in_dll(cf, "kCFRunLoopCommonModes"))
         self._drag_tap = tap
         cg.CGEventTapEnable(tap, True)
-        cf.CFRunLoopRun()  # до CFRunLoopStop из stop()
+        cf.CFRunLoopRun()  # until CFRunLoopStop from stop()
         cg.CGEventTapEnable(tap, False)
         cf.CFMachPortInvalidate(tap)
         cf.CFRelease(source)
@@ -227,8 +227,8 @@ class _MacTap:
             if code == _KEY_TAB and not flags & (_FLAG_COMMAND | _FLAG_CONTROL | _FLAG_OPTION):
                 if not cg.CGEventGetIntegerValueField(event, _FIELD_AUTOREPEAT):
                     self._on_drag_key(-1 if flags & _FLAG_SHIFT else 1)
-                return None  # приложение под курсором Tab не увидит
-            if code == _KEY_ESCAPE:  # система сама отменит перетаскивание
+                return None  # the app under the cursor won't see the Tab
+            if code == _KEY_ESCAPE:  # the system cancels the drag itself
                 self._dragging = False
                 self._on_drag_end()
         return event
@@ -251,7 +251,7 @@ class _MacTap:
 
     def _on_event(self, _proxy, event_type, event, _data):
         if event_type in _TAP_DISABLED:
-            # Система отключает перехватчик, если он долго думал; включаем обратно
+            # The system disables a tap that took too long; turn it back on
             self._cg.CGEventTapEnable(self._tap, True)
             return event
         if event_type == _RIGHT_DOWN:
@@ -260,14 +260,14 @@ class _MacTap:
                 point = self._cg.CGEventGetLocation(event)
                 self._swallow_up = True
                 self._callback(point.x, point.y)
-                return None  # Finder щелчка не увидит
+                return None  # Finder won't see the click
         elif event_type == _RIGHT_UP and self._swallow_up:
             self._swallow_up = False
             return None
         return event
 
     def click(self, x: float, y: float) -> None:
-        """Обычный левый щелчок в точке: выделяет файл под курсором и активирует его окно."""
+        """A plain left click at the point: selects the file under the cursor and activates its window."""
         cg = self._cg
         cg.CGEventCreateMouseEvent.restype = ctypes.c_void_p
         cg.CGEventCreateMouseEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint32, _CGPoint, ctypes.c_uint32]
@@ -275,7 +275,7 @@ class _MacTap:
         cg.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
         for kind in (_LEFT_DOWN, _LEFT_UP):
             ev = cg.CGEventCreateMouseEvent(None, kind, _CGPoint(x, y), 0)
-            cg.CGEventSetFlags(ev, 0)  # ⌘ ещё зажата физически; с ней щелчок изменил бы выделение
+            cg.CGEventSetFlags(ev, 0)  # ⌘ is still physically held; with it the click would change the selection
             cg.CGEventPost(0, ev)  # kCGHIDEventTap
             self._cf.CFRelease(ev)
 
@@ -331,7 +331,7 @@ class _WinHook:
         return self._hook is not None
 
     def ask_permission(self) -> None:
-        pass  # на Windows разрешение не нужно
+        pass  # Windows needs no permission
 
     def start(self) -> bool:
         module = self._kernel32.GetModuleHandleW(None)
@@ -368,11 +368,11 @@ class _WinHook:
             down = wparam in (self.WM_KEYDOWN, self.WM_SYSKEYDOWN)
             if info.vkCode == self.VK_TAB and not self._pressed(self.VK_MENU) \
                     and not self._pressed(self.VK_CONTROL):
-                if down and not self._tab_held:  # автоповтор пропускаем
+                if down and not self._tab_held:  # skip autorepeat
                     self._on_drag_key(-1 if self._pressed(self.VK_SHIFT) else 1)
                 self._tab_held = down
-                return 1  # окно под курсором Tab не увидит
-            if info.vkCode == self.VK_ESCAPE and down:  # система сама отменит перетаскивание
+                return 1  # the window under the cursor won't see the Tab
+            if info.vkCode == self.VK_ESCAPE and down:  # the system cancels the drag itself
                 self._dragging = False
                 self._on_drag_end()
         return self._user32.CallNextHookEx(None, code, wparam, lparam)
@@ -390,14 +390,14 @@ class _WinHook:
                     return 1
                 if wparam == self.WM_RBUTTONUP and self._swallow_up:
                     self._swallow_up = False
-                    # Отпущенный после щелчка Alt Windows считает одиночным нажатием и
-                    # включает меню окна; «пустая» клавиша 0xE8 этому мешает
+                    # Windows treats Alt released after the click as a lone press and
+                    # activates the window menu; the unassigned key 0xE8 prevents that
                     self._user32.keybd_event(0xE8, 0, 0, 0)
                     self._user32.keybd_event(0xE8, 0, 2, 0)  # KEYEVENTF_KEYUP
                     return 1
         return self._user32.CallNextHookEx(None, code, wparam, lparam)
 
     def click(self, x: float, y: float) -> None:
-        # Курсор уже в точке щелчка; MOUSEEVENTF_LEFTDOWN / LEFTUP
+        # The cursor is already at the click point; MOUSEEVENTF_LEFTDOWN / LEFTUP
         self._user32.mouse_event(0x0002, 0, 0, 0, 0)
         self._user32.mouse_event(0x0004, 0, 0, 0, 0)

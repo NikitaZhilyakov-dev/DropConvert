@@ -1,4 +1,4 @@
-"""Поддерживаемые форматы: что умеем читать и во что умеем конвертировать."""
+"""Supported formats: what we can read and what we can convert to."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,7 +10,7 @@ VIDEO = "video"
 AUDIO = "audio"
 
 CATEGORY_ORDER = (IMAGE, VIDEO, AUDIO)
-CATEGORY_NAMES = {IMAGE: "Изображения", VIDEO: "Видео", AUDIO: "Аудио"}
+CATEGORY_NAMES = {IMAGE: "Images", VIDEO: "Video", AUDIO: "Audio"}
 
 INPUT_EXTENSIONS = {
     IMAGE: {
@@ -36,12 +36,12 @@ TARGETS = {
 }
 
 
-# Инструменты для изображений: формат не меняется, рядом появляется изменённая копия
+# Image tools: the format stays the same, a modified copy appears next to the original
 TOOLS = ["compress", "strip", "trim", "half", "rotate", "gray", "white_bg"]
 
 
 def detect(path: Path) -> str | None:
-    """Категория файла по расширению или None, если формат не поддерживается."""
+    """The file's category by extension, or None if the format isn't supported."""
     ext = path.suffix.lower().lstrip(".")
     for category in CATEGORY_ORDER:
         if ext in INPUT_EXTENSIONS[category]:
