@@ -1,4 +1,4 @@
-"""Окно приложения: зона drag & drop, список файлов, кнопки форматов."""
+"""App window: drag & drop zone, file list, format buttons."""
 from __future__ import annotations
 
 import itertools
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import formats
-from .converters import convert
+from .converters import apply_tool, convert
 
 ACCENT = "#FF8A1F"
 
@@ -60,6 +60,8 @@ class TaskSignals(QObject):
 
 
 class ConvertTask(QRunnable):
+    """Converts to format fmt or, if fmt is in formats.TOOLS, applies an image tool."""
+
     def __init__(self, item: Item, fmt: str):
         super().__init__()
         self.item, self.fmt = item, fmt
@@ -68,18 +70,21 @@ class ConvertTask(QRunnable):
     def run(self) -> None:
         uid = self.item.uid
         try:
-            out = convert(
-                self.item.path, self.fmt,
-                on_progress=lambda p: self.signals.progress.emit(uid, p),
-                cancel=self.item.cancel,
-            )
+            if self.fmt in formats.TOOLS:
+                out = apply_tool(self.item.path, self.fmt)
+            else:
+                out = convert(
+                    self.item.path, self.fmt,
+                    on_progress=lambda p: self.signals.progress.emit(uid, p),
+                    cancel=self.item.cancel,
+                )
             self.signals.finished.emit(uid, str(out))
         except Exception as e:
             self.signals.failed.emit(uid, str(e))
 
 
 def expand(paths: list[Path]):
-    """Папки раскрываем рекурсивно, скрытые файлы пропускаем."""
+    """Expand folders recursively, skip hidden files."""
     for path in paths:
         if path.is_dir():
             yield from sorted(
@@ -99,7 +104,7 @@ def reveal_in_file_manager(path: Path) -> None:
 
 
 class DropZone(QFrame):
-    """Визуальная зона. Сам drop обрабатывает окно целиком, клик открывает диалог."""
+    """The visual zone. The whole window handles the drop itself; a click opens a dialog."""
 
     clicked = Signal()
 
@@ -111,7 +116,7 @@ class DropZone(QFrame):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon = QLabel("⇩")
         icon.setObjectName("dropIcon")
-        text = QLabel("Перетащите файлы сюда\nили нажмите, чтобы выбрать")
+        text = QLabel("Drop files here\nor click to choose")
         text.setObjectName("dropText")
         for w in (icon, text):
             w.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -156,7 +161,7 @@ class MainWindow(QWidget):
         self.drop_zone.clicked.connect(self.pick_files)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Файл", "Статус"])
+        self.tree.setHeaderLabels(["File", "Status"])
         self.tree.setRootIsDecorated(False)
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -166,11 +171,11 @@ class MainWindow(QWidget):
         self.formats_layout = QVBoxLayout(self.formats_box)
         self.formats_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.open_btn = QPushButton("Показать результат")
+        self.open_btn = QPushButton("Show result")
         self.open_btn.clicked.connect(lambda: self.last_output and reveal_in_file_manager(self.last_output))
-        clear_btn = QPushButton("Очистить")
+        clear_btn = QPushButton("Clear")
         clear_btn.clicked.connect(self.clear)
-        self.on_top = QCheckBox("Поверх окон")
+        self.on_top = QCheckBox("Stay on top")
         self.on_top.toggled.connect(self.set_on_top)
 
         bottom = QHBoxLayout()
@@ -190,7 +195,7 @@ class MainWindow(QWidget):
         self.on_top.setChecked(self.settings.value("onTop", False, type=bool))
         self._refresh()
 
-    # ----- Drag & drop по всему окну -----
+    # ----- Drag & drop onto the whole window -----
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
@@ -206,10 +211,10 @@ class MainWindow(QWidget):
         event.acceptProposedAction()
         self.add_files(paths)
 
-    # ----- Файлы -----
+    # ----- Files -----
 
     def pick_files(self) -> None:
-        files, _ = QFileDialog.getOpenFileNames(self, "Выберите файлы")
+        files, _ = QFileDialog.getOpenFileNames(self, "Choose files")
         self.add_files([Path(f) for f in files])
 
     def add_files(self, paths: list[Path]) -> None:
@@ -235,7 +240,7 @@ class MainWindow(QWidget):
         self.tree.clear()
         self._refresh()
 
-    # ----- Кнопки форматов -----
+    # ----- Format buttons -----
 
     def _refresh(self) -> None:
         has_items = bool(self.items)
@@ -252,21 +257,22 @@ class MainWindow(QWidget):
         for category in formats.CATEGORY_ORDER:
             if category not in present:
                 continue
-            label = QLabel(f"{formats.CATEGORY_NAMES[category]} → конвертировать в:")
+            label = QLabel(f"{formats.CATEGORY_NAMES[category]} → convert to:")
             label.setObjectName("section")
             grid_box = QWidget()
             grid = QGridLayout(grid_box)
             grid.setContentsMargins(0, 0, 0, 0)
             grid.setSpacing(6)
+            paths = [item.path for item in self.items.values() if item.category == category]
             for i, fmt in enumerate(formats.TARGETS[category]):
-                btn = QPushButton(fmt.upper())
+                btn = QPushButton(formats.label(category, fmt, paths))
                 btn.setObjectName("format")
                 btn.clicked.connect(lambda _=False, c=category, f=fmt: self.start(c, f))
                 grid.addWidget(btn, i // 5, i % 5)
             self.formats_layout.addWidget(label)
             self.formats_layout.addWidget(grid_box)
 
-    # ----- Конвертация -----
+    # ----- Conversion -----
 
     def start(self, category: str, fmt: str) -> None:
         for item in self.items.values():
@@ -274,7 +280,7 @@ class MainWindow(QWidget):
                 continue
             item.running = True
             item.cancel.clear()
-            self._set_status(item.uid, "В очереди…")
+            self._set_status(item.uid, "Queued…")
             task = ConvertTask(item, fmt)
             task.setAutoDelete(False)
             task.signals.progress.connect(self._on_progress)
@@ -304,7 +310,7 @@ class MainWindow(QWidget):
         self.tasks.pop(uid, None)
         if item := self.items.get(uid):
             item.running = False
-            self._set_status(uid, "✗ Ошибка", message)
+            self._set_status(uid, "✗ Error", message)
 
     def _on_double_click(self, row: QTreeWidgetItem) -> None:
         for uid, r in self.rows.items():
@@ -312,17 +318,17 @@ class MainWindow(QWidget):
                 item = self.items[uid]
                 reveal_in_file_manager(item.output or item.path)
 
-    # ----- Прочее -----
+    # ----- Misc -----
 
     def set_on_top(self, on: bool) -> None:
         self.settings.setValue("onTop", on)
         visible = self.isVisible()
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
-        if visible:  # смена флага прячет окно
+        if visible:  # changing the flag hides the window
             self.show()
 
     def closeEvent(self, event) -> None:
-        # Приложение живёт в строке меню: окно только прячем, конвертация продолжается
+        # The app lives in the menu bar: only hide the window, conversions keep going
         event.ignore()
         self.hide()
         self.hidden.emit()
@@ -334,7 +340,7 @@ class MainWindow(QWidget):
 
 
 class App(QApplication):
-    """На macOS файлы, брошенные на иконку в Dock, приходят как событие FileOpen."""
+    """On macOS files dropped on the Dock icon arrive as a FileOpen event."""
 
     fileOpened = Signal(str)
 

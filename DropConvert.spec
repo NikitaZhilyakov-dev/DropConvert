@@ -1,5 +1,5 @@
-# Сборка: pyinstaller DropConvert.spec --noconfirm
-# На macOS получится dist/DropConvert.app, на Windows — dist/DropConvert/DropConvert.exe
+# Build: pyinstaller DropConvert.spec --noconfirm
+# Produces dist/DropConvert.app on macOS, dist/DropConvert/DropConvert.exe on Windows
 import sys
 
 from PyInstaller.utils.hooks import collect_all
@@ -37,12 +37,12 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleShortVersionString": "0.1.0",
             "NSHighResolutionCapable": True,
-            # Живём в строке меню; значок в Dock появляется, только пока открыто окно
+            # Lives in the menu bar; the Dock icon shows only while the window is open
             "LSUIElement": True,
-            # Текст запроса доступа к Finder, чтобы узнать выделенные файлы
-            "NSAppleEventsUsageDescription": "DropConvert узнаёт у Finder, какие файлы выделены, "
-            "чтобы показать меню конвертации.",
-            # Разрешает бросать файлы на иконку приложения в Dock
+            # Text of the automation prompt: Finder for the selected files, Office for PDF export
+            "NSAppleEventsUsageDescription": "DropConvert asks Finder which files are selected "
+            "to show the convert menu, and asks Microsoft Office to save documents as PDF.",
+            # Allows dropping files on the app's Dock icon
             "CFBundleDocumentTypes": [
                 {
                     "CFBundleTypeName": "Media",
@@ -52,7 +52,20 @@ if sys.platform == "darwin":
                         "public.image", "public.movie", "public.audio",
                         "public.audiovisual-content",
                     ],
-                }
+                },
+                {
+                    "CFBundleTypeName": "Document",
+                    "CFBundleTypeRole": "Viewer",
+                    "LSHandlerRank": "Alternate",
+                    "LSItemContentTypes": [
+                        "com.microsoft.word.doc", "org.openxmlformats.wordprocessingml.document",
+                        "public.rtf", "org.oasis-open.opendocument.text",
+                        "com.microsoft.excel.xls", "org.openxmlformats.spreadsheetml.sheet",
+                        "org.oasis-open.opendocument.spreadsheet",
+                        "com.microsoft.powerpoint.ppt", "org.openxmlformats.presentationml.presentation",
+                        "org.oasis-open.opendocument.presentation",
+                    ],
+                },
             ],
         },
     )

@@ -1,4 +1,4 @@
-"""Всё, что зависит от ОС: выделенные файлы, автозапуск, значок в Dock."""
+"""Everything OS-specific: selected files, launch at login, the Dock icon."""
 from __future__ import annotations
 
 import ctypes
@@ -15,7 +15,7 @@ class SelectionError(Exception):
     pass
 
 
-# ---------- Выделенные файлы в Finder / Проводнике ----------
+# ---------- Selected files in Finder / File Explorer ----------
 
 _FINDER_SCRIPT = """
 tell application "Finder"
@@ -30,29 +30,29 @@ end tell
 
 
 def selected_files() -> list[Path]:
-    """Файлы, выделенные в активном окне файлового менеджера."""
+    """Files selected in the active file manager window."""
     if sys.platform == "darwin":
         return _finder_selection()
     if sys.platform == "win32":
         return _explorer_selection()
-    raise SelectionError("Эта ОС пока не поддерживается")
+    raise SelectionError("This OS isn't supported yet")
 
 
 def _finder_selection() -> list[Path]:
     try:
-        # Таймаут большой: при первом запуске macOS ждёт, пока пользователь ответит на запрос доступа
+        # Long timeout: on first launch macOS waits for the user to answer the access prompt
         result = subprocess.run(
             ["osascript", "-e", _FINDER_SCRIPT], capture_output=True, text=True, timeout=60
         )
     except subprocess.TimeoutExpired:
-        raise SelectionError("Finder не ответил") from None
+        raise SelectionError("Finder didn't respond") from None
     if result.returncode != 0:
         if "-1743" in result.stderr:  # errAEEventNotPermitted
             raise SelectionError(
-                "Нет доступа к Finder. Разрешите его в «Системные настройки → "
-                "Конфиденциальность и безопасность → Автоматизация»"
+                "No access to Finder. Allow it in System Settings → "
+                "Privacy & Security → Automation"
             )
-        raise SelectionError(result.stderr.strip() or "Не удалось получить выделение в Finder")
+        raise SelectionError(result.stderr.strip() or "Couldn't get the Finder selection")
     return [Path(line) for line in result.stdout.splitlines() if line]
 
 
@@ -69,12 +69,12 @@ def _explorer_selection() -> list[Path]:
                 continue
             items = window.Document.SelectedItems()
             return [Path(items.Item(i).Path) for i in range(items.Count)]
-        except Exception:  # окна Internet Explorer и прочие без Document
+        except Exception:  # Internet Explorer windows and others without a Document
             continue
     return []
 
 
-# ---------- Автозапуск при входе в систему ----------
+# ---------- Launch at login ----------
 
 _AGENT_LABEL = "com.dropconvert.agent"
 _LAUNCH_AGENT = Path.home() / "Library" / "LaunchAgents" / f"{_AGENT_LABEL}.plist"
@@ -131,10 +131,10 @@ def set_autostart(on: bool) -> None:
                     pass
 
 
-# ---------- macOS: значок в Dock и активация ----------
+# ---------- macOS: Dock icon and activation ----------
 
 class _ObjC:
-    """Минимальный вызов Objective-C через objc_msgSend, чтобы не тянуть pyobjc."""
+    """Minimal Objective-C calls via objc_msgSend, to avoid depending on pyobjc."""
 
     def __init__(self) -> None:
         self.lib = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
@@ -164,7 +164,7 @@ def _mac() -> _ObjC:
 
 
 def set_dock_icon_visible(visible: bool) -> None:
-    """На macOS прячем значок из Dock, пока открыто только меню в строке меню."""
+    """On macOS hide the Dock icon while only the menu bar item is in use."""
     if sys.platform != "darwin":
         return
     m = _mac()
@@ -181,7 +181,7 @@ def open_accessibility_settings() -> None:
 
 
 def activate_app() -> None:
-    """Выводит DropConvert на передний план (Qt сам этого на macOS не делает для фоновых приложений)."""
+    """Brings DropConvert to the front (Qt doesn't do this on macOS for background apps)."""
     if sys.platform == "darwin":
         m = _mac()
         app = m.send(m.cls("NSApplication"), "sharedApplication")
@@ -189,10 +189,10 @@ def activate_app() -> None:
 
 
 class FocusKeeper:
-    """Даёт меню получить фокус и возвращает его приложению, которое было активно до этого.
+    """Lets the menu take focus and gives it back to the previously active app.
 
-    Без активации меню на macOS не реагирует на клавиатуру, а без возврата фокус
-    остался бы у невидимого DropConvert, и Finder пришлось бы снова щёлкать мышью.
+    Without activation the menu on macOS ignores the keyboard, and without giving focus back
+    it would stay with the invisible DropConvert, and Finder would need another click.
     """
 
     def __init__(self) -> None:
@@ -206,7 +206,7 @@ class FocusKeeper:
             if self._previous:
                 m.send(self._previous, "retain")
             activate_app()
-            # Активация асинхронная, а меню, открытое до её окончания, не получает клавиатуру
+            # Activation is asynchronous, and a menu opened before it completes gets no keyboard input
             app = m.send(m.cls("NSApplication"), "sharedApplication")
             deadline = time.monotonic() + 0.5
             while not m.send(app, "isActive", restype=ctypes.c_bool) and time.monotonic() < deadline:
