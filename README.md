@@ -7,6 +7,21 @@ A drag & drop file converter for macOS and Windows. Drop files (or a folder) int
 | Images | PNG, JPG, WEBP, HEIC, AVIF, GIF, BMP, TIFF, ICO, TGA, PSD | PNG, JPG, WEBP, HEIC, AVIF, GIF, BMP, TIFF, ICO, PDF |
 | Video | MP4, MOV, MKV, WEBM, AVI, WMV, FLV, MPG, 3GP, TS | MP4, MOV, MKV, WEBM, AVI, GIF, plus MP3, WAV, M4A (extract audio) |
 | Audio | MP3, WAV, FLAC, OGG, M4A, AAC, WMA, OPUS, AIFF, AMR | MP3, WAV, FLAC, OGG, M4A, OPUS |
+| Documents | Word (DOC, DOCX, RTF, ODT), Excel (XLS, XLSX, ODS), PowerPoint (PPT, PPTX, ODP) | Single PDF, PDF by pages |
+
+Documents are converted by an office suite installed on the computer, since only it lays them out exactly: Microsoft Office if it's there (Word, Excel or PowerPoint, matching the file), otherwise [LibreOffice](https://www.libreoffice.org). **Single PDF** is the whole document in one file; for Excel, every sheet of the workbook. Excel sheets are printed with "Fit All Columns on One Page", so a wide table isn't cut into column strips; a sheet whose author already chose a "Fit to" scaling keeps it.
+
+**PDF by pages** makes a folder next to the original with a separate PDF for each part:
+
+| From | Splits into | Example |
+|---|---|---|
+| Word | pages | `report (pages)/report - 01.pdf` |
+| PowerPoint | slides | `deck (slides)/deck - 01.pdf` |
+| Excel | sheets | `book (sheets)/book - 1 Sales.pdf` |
+
+A long Excel sheet stays one file, however many pages it takes. Hidden and empty sheets are skipped. Characters a file name can't contain (`"` `<` `>` `|` and others) become `_`.
+
+The office app is started in the background and quit afterwards if DropConvert launched it; files open in it aren't touched. On macOS the first conversion asks for permission to control Word / Excel / PowerPoint (System Settings → Privacy & Security → Automation).
 
 ## Working from the menu bar
 
@@ -74,6 +89,7 @@ Unsigned, macOS warns about an unidentified developer on first launch (open it v
 
 ```bash
 .venv/bin/python -m pytest
+DROPCONVERT_OFFICE_TESTS=1 .venv/bin/python -m pytest tests/test_office.py   # launches the real Office / LibreOffice
 ```
 
 ## Layout
@@ -82,6 +98,7 @@ Unsigned, macOS warns about an unidentified developer on first launch (open it v
 main.py                    entry point
 dropconvert/formats.py     supported formats
 dropconvert/converters.py  conversion (Pillow + ffmpeg) and image tools
+dropconvert/office.py      documents to PDF via Microsoft Office (AppleScript / COM) or LibreOffice
 dropconvert/app.py         drag & drop window (PySide6)
 dropconvert/agent.py       menu bar icon, what the wheel shows (pages, tools), single instance
 dropconvert/wheel.py       the wheel (painting, animation, mouse, keyboard, drops) and the progress ring
@@ -92,4 +109,4 @@ DropConvert.spec           PyInstaller build config
 
 To add a tool, add it to `TOOLS` in `formats.py`, to `TOOL_SUFFIXES` and `_apply_image_tool` in `converters.py`, and its labels to `_TOOLS` in `agent.py`.
 
-To add a format, add it to `TARGETS` in `formats.py` and set its options in `_PIL_FORMATS` (images) or `FFMPEG_ARGS` (video and audio) in `converters.py`.
+To add a format, add it to `TARGETS` in `formats.py` and set its options in `_PIL_FORMATS` (images) or `FFMPEG_ARGS` (video and audio) in `converters.py`. A new document type goes into `KINDS` in `office.py`.

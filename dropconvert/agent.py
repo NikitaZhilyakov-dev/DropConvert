@@ -18,7 +18,7 @@ from PySide6.QtGui import QAction, QColor, QCursor, QIcon, QPainter, QPainterPat
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from . import formats, system
+from . import formats, office, system
 from .app import ACCENT, App, ConvertTask, Item, MainWindow, expand, reveal_in_file_manager
 from .converters import CANCELLED, TOOL_SUFFIXES
 from .trigger import DRAG_GESTURE, GESTURE, MouseTrigger
@@ -46,6 +46,15 @@ _TOOLS = {
     "white_bg": ("Fill", "white", "Replace transparency with white"),
 }
 CONVERT_PAGE, TOOLS_PAGE = "Convert", "Tools"
+
+
+def _caption(category: str, fmt: str, paths: list[Path]) -> str:
+    if fmt == formats.PDF_PAGES:
+        unit = office.split_unit(paths)[:-1]  # "pages" -> "page"
+        return f"A separate PDF for each {unit}, in a folder"
+    if category == formats.DOCUMENT:
+        return "Everything in one PDF"
+    return f"Convert to {fmt.upper()}"
 
 
 def plural_files(n: int) -> str:
@@ -166,8 +175,8 @@ class WheelSession:
         # Skip the sector if all files are already in that format
         targets = [f for f in formats.TARGETS[category] if sources != {f}]
         items = [
-            WheelItem(fmt.upper(), (category, fmt), _HINTS.get(category, {}).get(fmt, ""),
-                      f"Convert to {fmt.upper()}")
+            WheelItem(formats.label(category, fmt, paths), (category, fmt),
+                      _HINTS.get(category, {}).get(fmt, ""), _caption(category, fmt, paths))
             for fmt in targets
         ]
         self.wheel.set_items(items, self._center_label(paths), "window", "Open in the DropConvert window",
@@ -357,7 +366,8 @@ class Agent(QObject):
                          f"({TOOL_SUFFIXES[tool]})", center)
         elif isinstance(data, tuple):
             category, fmt = data
-            self.convert(session.by_category[category], category, fmt, f"→ {fmt.upper()}", center)
+            paths = session.by_category[category]
+            self.convert(paths, category, fmt, f"→ {formats.label(category, fmt, paths)}", center)
 
     # ----- Conversion -----
 

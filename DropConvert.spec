@@ -39,9 +39,9 @@ if sys.platform == "darwin":
             "NSHighResolutionCapable": True,
             # Lives in the menu bar; the Dock icon shows only while the window is open
             "LSUIElement": True,
-            # Text of the Finder access prompt, used to learn the selected files
+            # Text of the automation prompt: Finder for the selected files, Office for PDF export
             "NSAppleEventsUsageDescription": "DropConvert asks Finder which files are selected "
-            "to show the convert menu.",
+            "to show the convert menu, and asks Microsoft Office to save documents as PDF.",
             # Allows dropping files on the app's Dock icon
             "CFBundleDocumentTypes": [
                 {
@@ -52,7 +52,20 @@ if sys.platform == "darwin":
                         "public.image", "public.movie", "public.audio",
                         "public.audiovisual-content",
                     ],
-                }
+                },
+                {
+                    "CFBundleTypeName": "Document",
+                    "CFBundleTypeRole": "Viewer",
+                    "LSHandlerRank": "Alternate",
+                    "LSItemContentTypes": [
+                        "com.microsoft.word.doc", "org.openxmlformats.wordprocessingml.document",
+                        "public.rtf", "org.oasis-open.opendocument.text",
+                        "com.microsoft.excel.xls", "org.openxmlformats.spreadsheetml.sheet",
+                        "org.oasis-open.opendocument.spreadsheet",
+                        "com.microsoft.powerpoint.ppt", "org.openxmlformats.presentationml.presentation",
+                        "org.oasis-open.opendocument.presentation",
+                    ],
+                },
             ],
         },
     )

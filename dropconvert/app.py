@@ -263,8 +263,9 @@ class MainWindow(QWidget):
             grid = QGridLayout(grid_box)
             grid.setContentsMargins(0, 0, 0, 0)
             grid.setSpacing(6)
+            paths = [item.path for item in self.items.values() if item.category == category]
             for i, fmt in enumerate(formats.TARGETS[category]):
-                btn = QPushButton(fmt.upper())
+                btn = QPushButton(formats.label(category, fmt, paths))
                 btn.setObjectName("format")
                 btn.clicked.connect(lambda _=False, c=category, f=fmt: self.start(c, f))
                 grid.addWidget(btn, i // 5, i % 5)

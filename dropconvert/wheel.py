@@ -235,7 +235,8 @@ class FormatWheel(QWidget):
         d0 = min(math.degrees((self.GAP / 2 + c) / r0), half - 1)
         d1 = min(math.degrees((self.GAP / 2 + c) / r1), half - 1)
 
-        def arc(r: float, a_from: float, a_to: float, steps: int = 24) -> list[QPointF]:
+        def arc(r: float, a_from: float, a_to: float) -> list[QPointF]:
+            steps = max(24, int(abs(a_to - a_from) / 3))  # a lone sector spans the whole ring
             return [QPointF(r * math.cos(math.radians(a)), r * math.sin(math.radians(a)))
                     for a in (a_from + (a_to - a_from) * k / steps for k in range(steps + 1))]
 

@@ -1,7 +1,8 @@
-"""The conversion itself: images via Pillow, video and audio via ffmpeg."""
+"""The conversion itself: images via Pillow, video and audio via ffmpeg, documents via Office."""
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -12,7 +13,7 @@ from typing import Callable
 import imageio_ffmpeg
 from PIL import Image, ImageChops, ImageOps
 
-from . import formats
+from . import formats, office
 
 try:
     import pillow_heif
@@ -29,11 +30,13 @@ class ConversionError(Exception):
     pass
 
 
-def free_path(dst: Path) -> Path:
+def free_path(dst: Path, is_dir: bool = False) -> Path:
     """If the name is taken, append " (1)", " (2)" and so on."""
+    # A folder has no extension: "report v1.2 (pages)" must not become "report v1 (1).2 (pages)"
+    stem, suffix = (dst.name, "") if is_dir else (dst.stem, dst.suffix)
     base, n = dst, 1
     while dst.exists():
-        dst = base.with_name(f"{base.stem} ({n}){base.suffix}")
+        dst = base.with_name(f"{stem} ({n}){suffix}")
         n += 1
     return dst
 
@@ -53,6 +56,18 @@ def _write_via_tmp(dst: Path, write: Callable[[Path], None]) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def _write_dir_via_tmp(dst: Path, write: Callable[[Path], None]) -> None:
+    """The same for a folder: it appears only when every file in it is ready."""
+    tmp = dst.with_name(f"{dst.name}.converting")
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir()
+    try:
+        write(tmp)
+        tmp.rename(dst)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def convert(
     src: Path,
     fmt: str,
@@ -65,9 +80,18 @@ def convert(
     if fmt not in formats.TARGETS[category]:
         raise ConversionError(f"Can't convert to {fmt.upper()}")
 
+    if fmt == formats.PDF_PAGES:
+        # A folder next to the original: "deck (slides)/deck - 01.pdf", …
+        dst = free_path(src.with_name(f"{src.stem} ({office.split_unit([src])})"), is_dir=True)
+        _write_dir_via_tmp(dst, lambda tmp: _convert_document(src, tmp, fmt, cancel or threading.Event()))
+        on_progress(1.0)
+        return dst
+
     dst = output_path(src, fmt)
     if category == formats.IMAGE:
         _write_via_tmp(dst, lambda tmp: _convert_image(src, tmp, fmt))
+    elif category == formats.DOCUMENT:
+        _write_via_tmp(dst, lambda tmp: _convert_document(src, tmp, fmt, cancel or threading.Event()))
     else:
         _write_via_tmp(dst, lambda tmp: _convert_media(src, tmp, fmt, on_progress, cancel or threading.Event()))
     on_progress(1.0)
@@ -142,6 +166,20 @@ def _save_image(out: Image.Image, dst: Path, fmt: str, options: dict) -> None:
     if fmt == "ico":
         out, options["sizes"] = _square_icon(out)
     out.save(dst, _PIL_FORMATS[fmt], **options)
+
+
+# ---------- Documents ----------
+
+def _convert_document(src: Path, dst: Path, fmt: str, cancel: threading.Event) -> None:
+    try:
+        if fmt == formats.PDF_PAGES:
+            office.to_pdf_pages(src, dst, cancel)
+        else:
+            office.to_pdf(src, dst, cancel)
+    except office.Cancelled:
+        raise ConversionError(CANCELLED) from None
+    except office.OfficeError as e:
+        raise ConversionError(str(e)) from None
 
 
 # ---------- Image tools ----------
