@@ -6,7 +6,8 @@ with a pill showing the format name in the center. Works with the mouse or keybo
 ("Convert", "Tools"): Tab cycles through them.
 
 The wheel accepts dragged files: they are dropped right onto a sector.
-This module also has the progress ring the wheel collapses into after a choice.
+This module also has the progress ring the wheel collapses into after a choice,
+and the small page range field that "Pages…" opens.
 """
 from __future__ import annotations
 
@@ -15,12 +16,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import QElapsedTimer, QEvent, QEventLoop, QPoint, QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import (
+    QElapsedTimer, QEvent, QEventLoop, QPoint, QPointF, QRectF, QRegularExpression, Qt, QTimer,
+)
 from PySide6.QtGui import (
     QColor, QCursor, QFont, QFontMetricsF, QGuiApplication, QPainter, QPainterPath, QPainterPathStroker, QPen,
-    QPolygonF, QRadialGradient,
+    QPolygonF, QRadialGradient, QRegularExpressionValidator,
 )
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLineEdit, QWidget
 
 CENTER = "center"
 
@@ -593,6 +596,125 @@ class FormatWheel(QWidget):
             self._finish(None)
         return super().event(event)
 
+
+class RangeInput(QWidget):
+    """A small field at the cursor for a page range. Enter confirms, Esc or a click elsewhere cancels.
+
+    validate gets the typed text and returns an error to show under the field, or None.
+    """
+
+    W, H = 300, 118
+    MARGIN = 10  # room for the shadow
+    TITLE = 34   # title row above the field
+    FIELD = 38
+
+    def __init__(self, title: str, placeholder: str) -> None:
+        super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+                         | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
+        self.resize(self.W, self.H)
+        self.title = title
+        self.hint = ""
+        self.error = ""
+        self._validate: Callable[[str], str | None] = lambda _: None
+        self._loop: QEventLoop | None = None
+        self._result: str | None = None
+        self._was_active = False
+
+        t = _theme()
+        pad = self.MARGIN + 12
+        self.edit = QLineEdit(self)
+        self.edit.setGeometry(pad, self.MARGIN + self.TITLE, self.W - 2 * pad, self.FIELD)
+        self.edit.setPlaceholderText(placeholder)
+        self.edit.setValidator(QRegularExpressionValidator(QRegularExpression(r"[\d\s,;\-–—]*"), self.edit))
+        self.edit.setStyleSheet(
+            f"QLineEdit {{ background: {t.pill.name()}; color: {t.text.name()}; font-size: 16px;"
+            f" font-weight: 600; border: 1px solid {t.disc_edge.name()}; border-radius: 10px; padding: 0 10px; }}"
+            f"QLineEdit:focus {{ border: 2px solid {t.accent.name()}; padding: 0 9px; }}"
+        )
+        self.edit.returnPressed.connect(self._submit)
+        self.edit.textEdited.connect(self._clear_error)
+
+    def ask(self, pos: QPoint, hint: str, validate: Callable[[str], str | None]) -> str | None:
+        """Shows the field centered on pos and waits. Returns the text, or None if cancelled."""
+        self.hint, self._validate = hint, validate
+        screen = QGuiApplication.screenAt(pos) or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry()
+        x = min(max(pos.x() - self.W // 2, area.left()), area.right() - self.W)
+        y = min(max(pos.y() - self.H // 2, area.top()), area.bottom() - self.H)
+        self.move(int(x), int(y))
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.edit.setFocus()
+        self._loop = QEventLoop()
+        self._loop.exec()
+        self._loop = None
+        self.close()
+        return self._result
+
+    def _submit(self) -> None:
+        text = self.edit.text().strip()
+        if error := self._validate(text):
+            self.error = error
+            self.update()
+        else:
+            self._finish(text)
+
+    def _clear_error(self) -> None:
+        if self.error:
+            self.error = ""
+            self.update()
+
+    def _finish(self, result: str | None) -> None:
+        if self._loop is not None:
+            self._result = result
+            self._loop.quit()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self._finish(None)
+        else:
+            super().keyPressEvent(event)
+
+    def event(self, event) -> bool:
+        if event.type() == QEvent.Type.WindowActivate:
+            self._was_active = True
+        elif event.type() == QEvent.Type.WindowDeactivate and self._was_active:
+            self._finish(None)
+        return super().event(event)
+
+    def paintEvent(self, _event) -> None:
+        t = _theme()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        box = QRectF(self.rect()).adjusted(self.MARGIN, self.MARGIN, -self.MARGIN, -self.MARGIN)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 40))
+        p.drawRoundedRect(box.translated(0, 3), 16, 16)
+        p.setPen(QPen(t.disc_edge, 1))
+        p.setBrush(t.disc)
+        p.drawRoundedRect(box, 16, 16)
+
+        text_box = box.adjusted(12, 0, -12, 0)
+        font = QFont()
+        font.setPixelSize(13)
+        font.setWeight(QFont.Weight.DemiBold)
+        p.setFont(font)
+        p.setPen(t.text)
+        p.drawText(QRectF(text_box.x(), box.top(), text_box.width(), self.TITLE),
+                   Qt.AlignmentFlag.AlignCenter, self.title)
+
+        small = QFont()
+        small.setPixelSize(11)
+        p.setFont(small)
+        p.setPen(_ERROR if self.error else t.muted)
+        bottom = self.MARGIN + self.TITLE + self.FIELD
+        text = QFontMetricsF(small).elidedText(self.error or self.hint, Qt.TextElideMode.ElideRight,
+                                               text_box.width())
+        p.drawText(QRectF(text_box.x(), bottom, text_box.width(), box.bottom() - bottom),
+                   Qt.AlignmentFlag.AlignCenter, text)
 
 
 class ProgressRing(QWidget):

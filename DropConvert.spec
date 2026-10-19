@@ -64,6 +64,7 @@ if sys.platform == "darwin":
                         "org.oasis-open.opendocument.spreadsheet",
                         "com.microsoft.powerpoint.ppt", "org.openxmlformats.presentationml.presentation",
                         "org.oasis-open.opendocument.presentation",
+                        "com.adobe.pdf",
                     ],
                 },
             ],

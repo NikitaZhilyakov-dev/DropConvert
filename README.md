@@ -8,6 +8,7 @@ A drag & drop file converter for macOS and Windows. Drop files (or a folder) int
 | Video | MP4, MOV, MKV, WEBM, AVI, WMV, FLV, MPG, 3GP, TS | MP4, MOV, MKV, WEBM, AVI, GIF, plus MP3, WAV, M4A (extract audio) |
 | Audio | MP3, WAV, FLAC, OGG, M4A, AAC, WMA, OPUS, AIFF, AMR | MP3, WAV, FLAC, OGG, M4A, OPUS |
 | Documents | Word (DOC, DOCX, RTF, ODT), Excel (XLS, XLSX, ODS), PowerPoint (PPT, PPTX, ODP) | Single PDF, PDF by pages |
+| PDF | PDF | Pages… (chosen pages as one PDF) |
 
 Documents are converted by an office suite installed on the computer, since only it lays them out exactly: Microsoft Office if it's there (Word, Excel or PowerPoint, matching the file), otherwise [LibreOffice](https://www.libreoffice.org). **Single PDF** is the whole document in one file; for Excel, every sheet of the workbook. Excel sheets are printed with "Fit All Columns on One Page", so a wide table isn't cut into column strips; a sheet whose author already chose a "Fit to" scaling keeps it.
 
@@ -20,6 +21,8 @@ Documents are converted by an office suite installed on the computer, since only
 | Excel | sheets | `book (sheets)/book - 1 Sales.pdf` |
 
 A long Excel sheet stays one file, however many pages it takes. Hidden and empty sheets are skipped. Characters a file name can't contain (`"` `<` `>` `|` and others) become `_`.
+
+**Pages…** saves only the pages you list as one PDF next to the original, e.g. `report (pages 1-3, 5).pdf`. After picking the sector a small field opens at the cursor: type a range such as `1-3, 5, 8-` and press Enter (Esc cancels). `8-` runs to the last page, `-3` starts from the first; pages go in the order typed, repeats are dropped. With a single PDF the field shows its page count and won't accept a page that doesn't exist; with several PDFs the same range applies to each, and a file too short for it fails on its own. Bookmarks to the kept pages and the document info are preserved. This works without an office suite.
 
 The office app is started in the background and quit afterwards if DropConvert launched it; files open in it aren't touched. On macOS the first conversion asks for permission to control Word / Excel / PowerPoint (System Settings → Privacy & Security → Automation).
 
@@ -99,9 +102,10 @@ main.py                    entry point
 dropconvert/formats.py     supported formats
 dropconvert/converters.py  conversion (Pillow + ffmpeg) and image tools
 dropconvert/office.py      documents to PDF via Microsoft Office (AppleScript / COM) or LibreOffice
+dropconvert/pdf.py         page ranges ("1-3, 5, 8-") and saving chosen PDF pages (pypdf)
 dropconvert/app.py         drag & drop window (PySide6)
 dropconvert/agent.py       menu bar icon, what the wheel shows (pages, tools), single instance
-dropconvert/wheel.py       the wheel (painting, animation, mouse, keyboard, drops) and the progress ring
+dropconvert/wheel.py       the wheel (painting, animation, mouse, keyboard, drops), the progress ring, the page range field
 dropconvert/trigger.py     intercepting ⌘ / Alt + right-click and Tab while dragging (CGEventTap / WH_*_LL hooks)
 dropconvert/system.py      Finder / File Explorer selection, launch at login, Dock
 DropConvert.spec           PyInstaller build config

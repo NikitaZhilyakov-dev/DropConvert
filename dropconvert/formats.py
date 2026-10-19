@@ -11,9 +11,10 @@ IMAGE = "image"
 VIDEO = "video"
 AUDIO = "audio"
 DOCUMENT = "document"
+PDF = "pdf"
 
-CATEGORY_ORDER = (IMAGE, VIDEO, AUDIO, DOCUMENT)
-CATEGORY_NAMES = {IMAGE: "Images", VIDEO: "Video", AUDIO: "Audio", DOCUMENT: "Documents"}
+CATEGORY_ORDER = (IMAGE, VIDEO, AUDIO, DOCUMENT, PDF)
+CATEGORY_NAMES = {IMAGE: "Images", VIDEO: "Video", AUDIO: "Audio", DOCUMENT: "Documents", PDF: "PDF"}
 
 INPUT_EXTENSIONS = {
     IMAGE: {
@@ -30,6 +31,7 @@ INPUT_EXTENSIONS = {
     },
     # Word, Excel, PowerPoint and their OpenDocument counterparts
     DOCUMENT: set().union(*office.KINDS.values()),
+    PDF: {"pdf"},
 }
 
 _IMAGE_TARGETS = ["png", "jpg", "webp", "heic", "avif", "gif", "bmp", "tiff", "ico", "pdf"]
@@ -39,15 +41,20 @@ TARGETS = {
     VIDEO: ["mp4", "mov", "mkv", "webm", "avi", "gif", "mp3", "wav", "m4a"],
     AUDIO: ["mp3", "wav", "flac", "ogg", "m4a", "opus"],
     DOCUMENT: ["pdf", "pdf_pages"],
+    PDF: ["pdf_extract"],
 }
 
 # Not an extension: a folder with a PDF per page, slide or sheet
 PDF_PAGES = "pdf_pages"
+# Not an extension: one PDF with the pages the user lists ("1-3, 5, 8-")
+PDF_EXTRACT = "pdf_extract"
 
 
 def label(category: str, fmt: str, paths=()) -> str:
     """Button and sector text for a target; paths decide whether documents split by pages,
     slides or sheets."""
+    if fmt == PDF_EXTRACT:
+        return "Pages…"
     if category == DOCUMENT:
         return "Single PDF" if fmt == "pdf" else f"PDF by {office.split_unit(paths)}"
     return fmt.upper()

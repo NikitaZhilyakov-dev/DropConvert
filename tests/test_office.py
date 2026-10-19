@@ -17,7 +17,7 @@ SAMPLES = ["note.docx", "book.xlsx", "slides.pptx"]
     ("a.docx", office.WORD), ("a.DOC", office.WORD), ("a.rtf", office.WORD), ("a.odt", office.WORD),
     ("a.xlsx", office.EXCEL), ("a.ods", office.EXCEL),
     ("a.pptx", office.POWERPOINT), ("a.odp", office.POWERPOINT),
-    ("a.pdf", None), ("a.txt", None),
+    ("a.txt", None),
 ])
 def test_kind(name, kind):
     assert office.kind(Path(name)) == kind

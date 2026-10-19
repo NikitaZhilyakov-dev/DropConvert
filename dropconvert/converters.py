@@ -1,4 +1,5 @@
-"""The conversion itself: images via Pillow, video and audio via ffmpeg, documents via Office."""
+"""The conversion itself: images via Pillow, video and audio via ffmpeg, documents via Office,
+PDF pages via pypdf."""
 from __future__ import annotations
 
 import re
@@ -13,7 +14,7 @@ from typing import Callable
 import imageio_ffmpeg
 from PIL import Image, ImageChops, ImageOps
 
-from . import formats, office
+from . import formats, office, pdf
 
 try:
     import pillow_heif
@@ -73,12 +74,19 @@ def convert(
     fmt: str,
     on_progress: ProgressCallback = lambda p: None,
     cancel: threading.Event | None = None,
+    pages: str | None = None,
 ) -> Path:
+    """pages: the range for PDF_EXTRACT, as typed ("1-3, 5, 8-")."""
     category = formats.detect(src)
     if category is None:
         raise ConversionError("Unsupported format")
     if fmt not in formats.TARGETS[category]:
         raise ConversionError(f"Can't convert to {fmt.upper()}")
+
+    if fmt == formats.PDF_EXTRACT:
+        dst = _extract_pages(src, pages or "")
+        on_progress(1.0)
+        return dst
 
     if fmt == formats.PDF_PAGES:
         # A folder next to the original: "deck (slides)/deck - 01.pdf", …
@@ -180,6 +188,20 @@ def _convert_document(src: Path, dst: Path, fmt: str, cancel: threading.Event) -
         raise ConversionError(CANCELLED) from None
     except office.OfficeError as e:
         raise ConversionError(str(e)) from None
+
+
+# ---------- PDF pages ----------
+
+def _extract_pages(src: Path, spec: str) -> Path:
+    """Only the pages in spec, as one PDF next to the original: "report (pages 1-3, 5).pdf"."""
+    try:
+        reader = pdf.open_pdf(src)
+        pages = pdf.resolve(pdf.parse_ranges(spec), len(reader.pages))
+        dst = free_path(src.with_name(f"{src.stem} ({pdf.describe(pages)}).pdf"))
+        _write_via_tmp(dst, lambda tmp: pdf.write_pages(reader, pages, tmp))
+    except pdf.PdfError as e:
+        raise ConversionError(str(e)) from None
+    return dst
 
 
 # ---------- Image tools ----------

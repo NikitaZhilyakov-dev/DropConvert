@@ -9,14 +9,16 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QRunnable, QSettings, Qt, QThreadPool, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRunnable, QSettings, Qt, QThreadPool, Signal
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView,
     QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from . import formats
+from . import formats, pdf, system
 from .converters import apply_tool, convert
+from .wheel import RangeInput
 
 ACCENT = "#FF8A1F"
 
@@ -60,11 +62,12 @@ class TaskSignals(QObject):
 
 
 class ConvertTask(QRunnable):
-    """Converts to format fmt or, if fmt is in formats.TOOLS, applies an image tool."""
+    """Converts to format fmt or, if fmt is in formats.TOOLS, applies an image tool.
+    pages is the range for formats.PDF_EXTRACT."""
 
-    def __init__(self, item: Item, fmt: str):
+    def __init__(self, item: Item, fmt: str, pages: str | None = None):
         super().__init__()
-        self.item, self.fmt = item, fmt
+        self.item, self.fmt, self.pages = item, fmt, pages
         self.signals = TaskSignals()
 
     def run(self) -> None:
@@ -77,6 +80,7 @@ class ConvertTask(QRunnable):
                     self.item.path, self.fmt,
                     on_progress=lambda p: self.signals.progress.emit(uid, p),
                     cancel=self.item.cancel,
+                    pages=self.pages,
                 )
             self.signals.finished.emit(uid, str(out))
         except Exception as e:
@@ -92,6 +96,26 @@ def expand(paths: list[Path]):
             )
         elif path.is_file():
             yield path
+
+
+def ask_page_range(at: QPoint, paths: list[Path]) -> str | None:
+    """Asks which PDF pages to extract. With one file the range is checked against its page count."""
+    count = pdf.page_count(paths[0]) if len(paths) == 1 else None
+    hint = (f"The PDF has {pdf.plural_pages(count)} · Enter to save" if count
+            else f"e.g. {pdf.EXAMPLE} · Enter to save")
+
+    def validate(spec: str) -> str | None:
+        try:
+            ranges = pdf.parse_ranges(spec)
+            if count:
+                pdf.resolve(ranges, count)
+        except pdf.PageRangeError as e:
+            return str(e)
+        return None
+
+    title = "Pages to save" if len(paths) == 1 else f"Pages to save from {len(paths)} PDFs"
+    with system.FocusKeeper():  # the field needs the keyboard, even when opened mid-drag
+        return RangeInput(title, pdf.EXAMPLE).ask(at, hint, validate)
 
 
 def reveal_in_file_manager(path: Path) -> None:
@@ -275,13 +299,17 @@ class MainWindow(QWidget):
     # ----- Conversion -----
 
     def start(self, category: str, fmt: str) -> None:
-        for item in self.items.values():
-            if item.category != category or item.running:
-                continue
+        waiting = [item for item in self.items.values() if item.category == category and not item.running]
+        pages = None
+        if fmt == formats.PDF_EXTRACT and waiting:
+            pages = ask_page_range(QCursor.pos(), [item.path for item in waiting])
+            if pages is None:
+                return
+        for item in waiting:
             item.running = True
             item.cancel.clear()
             self._set_status(item.uid, "Queued…")
-            task = ConvertTask(item, fmt)
+            task = ConvertTask(item, fmt, pages)
             task.setAutoDelete(False)
             task.signals.progress.connect(self._on_progress)
             task.signals.finished.connect(self._on_finished)

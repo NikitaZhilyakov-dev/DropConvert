@@ -19,7 +19,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from . import formats, office, system
-from .app import ACCENT, App, ConvertTask, Item, MainWindow, expand, reveal_in_file_manager
+from .app import ACCENT, App, ConvertTask, Item, MainWindow, ask_page_range, expand, reveal_in_file_manager
 from .converters import CANCELLED, TOOL_SUFFIXES
 from .trigger import DRAG_GESTURE, GESTURE, MouseTrigger
 from .wheel import FormatWheel, ProgressRing, WheelItem
@@ -33,6 +33,7 @@ _SAME_FORMAT = {"jpeg": "jpg", "jpe": "jpg", "tif": "tiff", "heif": "heic", "oga
 _HINTS = {
     formats.VIDEO: {"gif": "animation", "mp3": "audio only", "wav": "audio only", "m4a": "audio only"},
     formats.IMAGE: {"pdf": "document", "ico": "icon"},
+    formats.PDF: {formats.PDF_EXTRACT: "into one PDF"},
 }
 
 # Image tools: sector label, small hint, caption under the wheel
@@ -49,6 +50,8 @@ CONVERT_PAGE, TOOLS_PAGE = "Convert", "Tools"
 
 
 def _caption(category: str, fmt: str, paths: list[Path]) -> str:
+    if fmt == formats.PDF_EXTRACT:
+        return "Save only the pages you list"
     if fmt == formats.PDF_PAGES:
         unit = office.split_unit(paths)[:-1]  # "pages" -> "page"
         return f"A separate PDF for each {unit}, in a folder"
@@ -315,6 +318,7 @@ class Agent(QObject):
                 data = session.run(timeout_ms=1800 if not session.by_category else 0)
                 center = wheel.center_global()
                 wheel.close_animated(collapse=self._is_job(data))
+                data = self._ask_pages(session, data, center)
         finally:
             self.menu_open = False
         self._apply(session, data, center)
@@ -346,6 +350,8 @@ class Agent(QObject):
             data = session.run()
             center = wheel.center_global()
             wheel.close_animated(collapse=self._is_job(data))
+            self.drag_wheel = None  # Tab while typing the range mustn't reach the closed wheel
+            data = self._ask_pages(session, data, center)
         finally:
             self.menu_open = False
             self.drag_wheel = None
@@ -355,7 +361,16 @@ class Agent(QObject):
 
     @staticmethod
     def _is_job(data: object) -> bool:
-        return isinstance(data, tuple)
+        """A choice that starts converting right away: "Pages…" asks for the range first."""
+        return isinstance(data, tuple) and data[1] != formats.PDF_EXTRACT
+
+    @staticmethod
+    def _ask_pages(session: WheelSession, data: object, at: QPoint) -> object:
+        """For "Pages…" the choice gets the typed range as a third element, or None if cancelled."""
+        if not (isinstance(data, tuple) and data[1] == formats.PDF_EXTRACT):
+            return data
+        pages = ask_page_range(at, session.by_category[formats.PDF])
+        return None if pages is None else (*data, pages)
 
     def _apply(self, session: WheelSession, data: object, center: QPoint) -> None:
         if data == "window":
@@ -364,6 +379,9 @@ class Agent(QObject):
             tool = data[1]
             self.convert(session.by_category[formats.IMAGE], formats.IMAGE, tool,
                          f"({TOOL_SUFFIXES[tool]})", center)
+        elif isinstance(data, tuple) and data[1] == formats.PDF_EXTRACT:
+            category, fmt, pages = data
+            self.convert(session.by_category[category], category, fmt, f"(pages {pages})", center, pages)
         elif isinstance(data, tuple):
             category, fmt = data
             paths = session.by_category[category]
@@ -372,12 +390,13 @@ class Agent(QObject):
     # ----- Conversion -----
 
     def convert(self, paths: list[Path], category: str, fmt: str, label: str,
-                at: QPoint | None = None) -> None:
-        """fmt is a format or a tool from formats.TOOLS; at is where the progress ring appears."""
+                at: QPoint | None = None, pages: str | None = None) -> None:
+        """fmt is a format or a tool from formats.TOOLS; at is where the progress ring appears;
+        pages is the range for formats.PDF_EXTRACT."""
         batch = Batch(label, len(paths))
         for path in paths:
             item = Item(path, category)
-            task = ConvertTask(item, fmt)
+            task = ConvertTask(item, fmt, pages)
             task.setAutoDelete(False)
             task.signals.progress.connect(self._on_progress)
             task.signals.finished.connect(self._on_finished)
