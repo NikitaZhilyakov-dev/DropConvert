@@ -63,18 +63,19 @@ class TaskSignals(QObject):
 
 class ConvertTask(QRunnable):
     """Converts to format fmt or, if fmt is in formats.TOOLS, applies an image tool.
-    pages is the range for formats.PDF_EXTRACT."""
+    pages is the range for formats.PDF_EXTRACT, box the frame for formats.CROP."""
 
-    def __init__(self, item: Item, fmt: str, pages: str | None = None):
+    def __init__(self, item: Item, fmt: str, pages: str | None = None,
+                 box: tuple[int, int, int, int] | None = None):
         super().__init__()
-        self.item, self.fmt, self.pages = item, fmt, pages
+        self.item, self.fmt, self.pages, self.box = item, fmt, pages, box
         self.signals = TaskSignals()
 
     def run(self) -> None:
         uid = self.item.uid
         try:
             if self.fmt in formats.TOOLS:
-                out = apply_tool(self.item.path, self.fmt)
+                out = apply_tool(self.item.path, self.fmt, self.box)
             else:
                 out = convert(
                     self.item.path, self.fmt,

@@ -208,7 +208,7 @@ def _extract_pages(src: Path, spec: str) -> Path:
 
 # Appended to the copy's name: "photo (compressed).jpg"
 TOOL_SUFFIXES = {
-    "compress": "compressed", "strip": "no metadata", "trim": "trimmed", "half": "50%",
+    "compress": "compressed", "strip": "no metadata", "trim": "trimmed", "crop": "cropped",
     "rotate": "rotated", "gray": "bw", "white_bg": "white bg",
 }
 _COMPRESS_OPTIONS = {
@@ -224,8 +224,9 @@ _EXIF_FORMATS = {"jpg", "png", "webp", "heic", "avif", "tiff"}
 _ICC_MODES = {"RGB", "RGBA", "L", "LA"}
 
 
-def apply_tool(src: Path, tool: str) -> Path:
-    """A modified copy of the image next to the original, in the same format."""
+def apply_tool(src: Path, tool: str, box: tuple[int, int, int, int] | None = None) -> Path:
+    """A modified copy of the image next to the original, in the same format.
+    box is the "crop" frame (left, top, right, bottom) in pixels of the upright image."""
     if formats.detect(src) != formats.IMAGE:
         raise ConversionError("Tools work only with images")
     if tool not in TOOL_SUFFIXES:
@@ -240,7 +241,7 @@ def apply_tool(src: Path, tool: str) -> Path:
     dst = free_path(src.with_name(f"{src.stem} ({TOOL_SUFFIXES[tool]}).{fmt}"))
 
     def write(tmp: Path) -> None:
-        _apply_image_tool(src, tmp, fmt, tool)
+        _apply_image_tool(src, tmp, fmt, tool, box)
         if tool == "compress" and tmp.stat().st_size >= src.stat().st_size:
             raise ConversionError("Couldn't compress further: the file is already optimized")
 
@@ -248,7 +249,8 @@ def apply_tool(src: Path, tool: str) -> Path:
     return dst
 
 
-def _apply_image_tool(src: Path, dst: Path, fmt: str, tool: str) -> None:
+def _apply_image_tool(src: Path, dst: Path, fmt: str, tool: str,
+                      box: tuple[int, int, int, int] | None = None) -> None:
     try:
         with Image.open(src) as im:
             if getattr(im, "n_frames", 1) > 1:
@@ -273,8 +275,8 @@ def _apply_image_tool(src: Path, dst: Path, fmt: str, tool: str) -> None:
                     out = _quantize(out)
             elif tool == "trim":
                 out = _trim(out)
-            elif tool == "half":
-                out = out.resize((max(1, out.width // 2), max(1, out.height // 2)), Image.Resampling.LANCZOS)
+            elif tool == "crop":
+                out = _crop(out, box)
             elif tool == "rotate":
                 out = out.transpose(Image.Transpose.ROTATE_270)
             elif tool == "gray":
@@ -303,6 +305,18 @@ def _quantize(im: Image.Image) -> Image.Image:
     if _has_alpha(im):
         return im.convert("RGBA").quantize(256, method=Image.Quantize.FASTOCTREE)
     return im.convert("RGB").quantize(256, method=Image.Quantize.MEDIANCUT)
+
+
+def _crop(im: Image.Image, box: tuple[int, int, int, int] | None) -> Image.Image:
+    """box is in the upright image (EXIF rotation applied), the way the crop editor shows it."""
+    if box is None:
+        raise ConversionError("Choose the area to crop")
+    left, top, right, bottom = max(0, box[0]), max(0, box[1]), min(im.width, box[2]), min(im.height, box[3])
+    if right <= left or bottom <= top:
+        raise ConversionError("The crop area is empty")
+    if (left, top, right, bottom) == (0, 0, *im.size):
+        raise ConversionError("The crop area is the whole image")
+    return im.crop((left, top, right, bottom))
 
 
 def _trim(im: Image.Image) -> Image.Image:

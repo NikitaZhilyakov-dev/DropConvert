@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 from . import formats, office, system
 from .app import ACCENT, App, ConvertTask, Item, MainWindow, ask_page_range, expand, reveal_in_file_manager
 from .converters import CANCELLED, TOOL_SUFFIXES
+from .editor import crop_images
 from .trigger import DRAG_GESTURE, GESTURE, MouseTrigger
 from .wheel import FormatWheel, ProgressRing, WheelItem
 
@@ -41,7 +42,7 @@ _TOOLS = {
     "compress": ("Compress", "smaller file", "Compress without changing the format"),
     "strip": ("Strip", "metadata", "Remove EXIF, location and other metadata"),
     "trim": ("Trim", "empty borders", "Trim solid-color or transparent borders"),
-    "half": ("Shrink", "by half", "Halve the width and height"),
+    "crop": ("Crop", "in preview", "Crop in a preview window"),
     "rotate": ("Rotate", "90°", "Rotate 90° clockwise"),
     "gray": ("B&W", "grayscale", "Convert to black and white"),
     "white_bg": ("Fill", "white", "Replace transparency with white"),
@@ -318,7 +319,7 @@ class Agent(QObject):
                 data = session.run(timeout_ms=1800 if not session.by_category else 0)
                 center = wheel.center_global()
                 wheel.close_animated(collapse=self._is_job(data))
-                data = self._ask_pages(session, data, center)
+                data = self._ask_details(session, data, center)
         finally:
             self.menu_open = False
         self._apply(session, data, center)
@@ -350,8 +351,8 @@ class Agent(QObject):
             data = session.run()
             center = wheel.center_global()
             wheel.close_animated(collapse=self._is_job(data))
-            self.drag_wheel = None  # Tab while typing the range mustn't reach the closed wheel
-            data = self._ask_pages(session, data, center)
+            self.drag_wheel = None  # Tab in the range field or editor mustn't reach the closed wheel
+            data = self._ask_details(session, data, center)
         finally:
             self.menu_open = False
             self.drag_wheel = None
@@ -361,24 +362,30 @@ class Agent(QObject):
 
     @staticmethod
     def _is_job(data: object) -> bool:
-        """A choice that starts converting right away: "Pages…" asks for the range first."""
-        return isinstance(data, tuple) and data[1] != formats.PDF_EXTRACT
+        """A choice that starts converting right away: "Pages…" and "Crop" ask for details first."""
+        return isinstance(data, tuple) and data[1] not in (formats.PDF_EXTRACT, formats.CROP)
 
     @staticmethod
-    def _ask_pages(session: WheelSession, data: object, at: QPoint) -> object:
-        """For "Pages…" the choice gets the typed range as a third element, or None if cancelled."""
-        if not (isinstance(data, tuple) and data[1] == formats.PDF_EXTRACT):
-            return data
-        pages = ask_page_range(at, session.by_category[formats.PDF])
-        return None if pages is None else (*data, pages)
+    def _ask_details(session: WheelSession, data: object, at: QPoint) -> object:
+        """"Pages…" asks for the range, "Crop" opens the editor. The answer becomes the choice's
+        third element; the choice becomes None if cancelled."""
+        if data == ("tool", formats.CROP):
+            with system.FocusKeeper():
+                boxes = crop_images(session.by_category[formats.IMAGE])
+            return (*data, boxes) if boxes else None
+        if isinstance(data, tuple) and data[1] == formats.PDF_EXTRACT:
+            pages = ask_page_range(at, session.by_category[formats.PDF])
+            return None if pages is None else (*data, pages)
+        return data
 
     def _apply(self, session: WheelSession, data: object, center: QPoint) -> None:
         if data == "window":
             self.show_window(session.files)
         elif isinstance(data, tuple) and data[0] == "tool":
-            tool = data[1]
-            self.convert(session.by_category[formats.IMAGE], formats.IMAGE, tool,
-                         f"({TOOL_SUFFIXES[tool]})", center)
+            tool, *details = data[1:]
+            boxes = details[0] if details else None  # "Crop": only the images saved in the editor
+            self.convert(list(boxes) if boxes else session.by_category[formats.IMAGE], formats.IMAGE, tool,
+                         f"({TOOL_SUFFIXES[tool]})", center, boxes=boxes)
         elif isinstance(data, tuple) and data[1] == formats.PDF_EXTRACT:
             category, fmt, pages = data
             self.convert(session.by_category[category], category, fmt, f"(pages {pages})", center, pages)
@@ -390,13 +397,14 @@ class Agent(QObject):
     # ----- Conversion -----
 
     def convert(self, paths: list[Path], category: str, fmt: str, label: str,
-                at: QPoint | None = None, pages: str | None = None) -> None:
+                at: QPoint | None = None, pages: str | None = None,
+                boxes: dict[Path, tuple[int, int, int, int]] | None = None) -> None:
         """fmt is a format or a tool from formats.TOOLS; at is where the progress ring appears;
-        pages is the range for formats.PDF_EXTRACT."""
+        pages is the range for formats.PDF_EXTRACT, boxes the frame of each image for formats.CROP."""
         batch = Batch(label, len(paths))
         for path in paths:
             item = Item(path, category)
-            task = ConvertTask(item, fmt, pages)
+            task = ConvertTask(item, fmt, pages, boxes.get(path) if boxes else None)
             task.setAutoDelete(False)
             task.signals.progress.connect(self._on_progress)
             task.signals.finished.connect(self._on_finished)

@@ -61,7 +61,8 @@ def label(category: str, fmt: str, paths=()) -> str:
 
 
 # Image tools: the format stays the same, a modified copy appears next to the original
-TOOLS = ["compress", "strip", "trim", "half", "rotate", "gray", "white_bg"]
+TOOLS = ["compress", "strip", "trim", "crop", "rotate", "gray", "white_bg"]
+CROP = "crop"  # opens the crop editor before converting
 
 
 def detect(path: Path) -> str | None:

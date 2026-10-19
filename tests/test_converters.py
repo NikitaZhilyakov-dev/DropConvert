@@ -101,7 +101,7 @@ def test_tools_keep_format(tmp_path, tool, fmt):
             apply_tool(src, tool)
         return
     try:
-        out = apply_tool(src, tool)
+        out = apply_tool(src, tool, (10, 10, 70, 50) if tool == "crop" else None)
     except ConversionError as e:  # compression may fairly refuse if there's no gain
         assert tool == "compress" and "optimized" in str(e)
         return
@@ -109,7 +109,7 @@ def test_tools_keep_format(tmp_path, tool, fmt):
     assert not list(tmp_path.glob("*.converting*"))
     with Image.open(out) as res:
         w, h = res.size
-    expected = {"half": (60, 40), "rotate": (80, 120)}.get(tool)
+    expected = {"crop": (60, 40), "rotate": (80, 120)}.get(tool)
     if expected:
         assert (w, h) == expected
     if tool == "trim" and fmt != "jpg":
@@ -136,11 +136,25 @@ def test_strip_upright_jpeg_is_lossless(tmp_path):
 
 
 def test_other_tools_keep_exif(photo):
-    out = apply_tool(photo, "half")
+    out = apply_tool(photo, "rotate")
     with Image.open(out) as im:
         exif = im.getexif()
         assert exif[0x010F] == "Camera" and exif.get(0x0112, 1) == 1
-        assert im.size == (50, 100)
+        assert im.size == (200, 100)
+
+
+def test_crop_box_is_in_the_upright_image(photo):
+    out = apply_tool(photo, "crop", (10, 20, 60, 120))  # photo is 100×200 once EXIF rotation is applied
+    assert out.name == "photo (cropped).jpg"
+    with Image.open(out) as im:
+        assert im.size == (50, 100) and im.getexif()[0x010F] == "Camera"
+
+
+@pytest.mark.parametrize("box", [None, (0, 0, 100, 200), (50, 50, 50, 80), (120, 0, 150, 10)])
+def test_crop_rejects_useless_boxes(photo, box):
+    with pytest.raises(ConversionError):
+        apply_tool(photo, "crop", box)
+    assert not list(photo.parent.glob("*cropped*"))
 
 
 def test_compress_makes_jpeg_smaller(photo):

@@ -46,12 +46,14 @@ Image tools keep the format and put the result alongside, e.g. `photo (compresse
 | Compress | re-encodes JPG, WEBP, HEIC, AVIF at lower quality; turns PNG into a 256-color palette. If the file doesn't get smaller, no copy is made |
 | Strip metadata | removes EXIF, location and the like; EXIF rotation is applied to the image. A plain JPEG is saved without re-encoding |
 | Trim | cuts transparent or solid-color borders |
-| Shrink | halves each side |
+| Crop | opens a preview to choose the area, see below |
 | Rotate | 90° clockwise |
 | B&W | grayscale |
 | Fill | replaces transparency with white |
 
 All tools except Strip keep EXIF (capture date, camera). Animated GIF and WEBP aren't supported by the tools yet.
+
+**Crop** opens a window with the image as it will come out (EXIF rotation applied) and a frame on top. Drag the frame's corners or edges to resize it, drag inside to move it, or drag outside to draw a new one. The buttons below lock the proportions (Free, Original, 1:1, 4:3, 3:2, 16:9); ⇄ swaps portrait and landscape. Enter or Save keeps the crop, Esc or Cancel closes the window. With several images they come one by one: Save queues the crop and shows the next image, Skip moves on, Cancel stops (crops already saved still happen). The chosen ratio carries over to the next image. The copy is `photo (cropped).jpg`; a JPEG is re-encoded at quality 92.
 
 Launch at login can be turned on from the icon's menu. Closing the window doesn't quit the app; quit from the icon's menu.
 
@@ -106,6 +108,7 @@ dropconvert/pdf.py         page ranges ("1-3, 5, 8-") and saving chosen PDF page
 dropconvert/app.py         drag & drop window (PySide6)
 dropconvert/agent.py       menu bar icon, what the wheel shows (pages, tools), single instance
 dropconvert/wheel.py       the wheel (painting, animation, mouse, keyboard, drops), the progress ring, the page range field
+dropconvert/editor.py      the crop editor: preview, crop frame, ratio presets
 dropconvert/trigger.py     intercepting ⌘ / Alt + right-click and Tab while dragging (CGEventTap / WH_*_LL hooks)
 dropconvert/system.py      Finder / File Explorer selection, launch at login, Dock
 DropConvert.spec           PyInstaller build config
