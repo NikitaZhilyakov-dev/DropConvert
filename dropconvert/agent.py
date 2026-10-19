@@ -1,4 +1,9 @@
-"""Фоновая утилита: значок в строке меню (трее) и меню действий у курсора по жесту мышью."""
+"""Фоновая утилита: значок в строке меню (трее) и колесо действий у курсора.
+
+Колесо открывается двумя жестами: ⌘ / Alt + правый щелчок по выделенным файлам или
+Tab во время перетаскивания файла (тогда файл бросают прямо на сектор). После выбора
+колесо сворачивается в кольцо прогресса у курсора.
+"""
 from __future__ import annotations
 
 import getpass
@@ -8,15 +13,16 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPointF, QSettings, Qt, QThreadPool, QTimer
+from PySide6.QtCore import QObject, QPoint, QPointF, QSettings, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from . import formats, system
 from .app import ACCENT, App, ConvertTask, Item, MainWindow, expand, reveal_in_file_manager
-from .trigger import GESTURE, MouseTrigger
-from .wheel import FormatWheel, WheelItem
+from .converters import TOOL_SUFFIXES
+from .trigger import DRAG_GESTURE, GESTURE, MouseTrigger
+from .wheel import FormatWheel, ProgressRing, WheelItem
 
 FILE_MANAGER = "Finder" if sys.platform == "darwin" else "Проводнике"
 
@@ -28,6 +34,18 @@ _HINTS = {
     formats.VIDEO: {"gif": "анимация", "mp3": "только звук", "wav": "только звук", "m4a": "только звук"},
     formats.IMAGE: {"pdf": "документ", "ico": "иконка"},
 }
+
+# Инструменты для картинок: подпись в секторе, мелкая подпись, подпись под колесом
+_TOOLS = {
+    "compress": ("Сжать", "меньше вес", "Сжать, не меняя формат"),
+    "strip": ("Очистить", "метаданные", "Удалить EXIF, геопозицию и прочие метаданные"),
+    "trim": ("Обрезать", "пустые поля", "Обрезать однотонные или прозрачные поля"),
+    "half": ("Уменьшить", "вдвое", "Уменьшить вдвое по каждой стороне"),
+    "rotate": ("Повернуть", "на 90°", "Повернуть на 90° по часовой стрелке"),
+    "gray": ("Ч/Б", "без цвета", "Сделать чёрно-белой"),
+    "white_bg": ("Фон", "белый", "Заменить прозрачность белым фоном"),
+}
+CONVERT_PAGE, TOOLS_PAGE = "Конвертация", "Инструменты"
 
 
 def plural_files(n: int) -> str:
@@ -73,11 +91,101 @@ def tray_icon() -> QIcon:
 class Batch:
     """Файлы, отправленные одним выбором в меню: по ним показываем одно уведомление."""
 
-    fmt: str
+    label: str  # что сделали: «→ PNG» или «(сжато)»
     total: int
     done: int = 0
     errors: list[str] = field(default_factory=list)
     last_output: Path | None = None
+
+
+class WheelSession:
+    """Что показывает колесо для набора файлов: страницы, выбор типа, форматы, инструменты."""
+
+    def __init__(self, wheel: FormatWheel) -> None:
+        self.wheel = wheel
+        self.selected: list[Path] | None = None  # None — файлов ещё нет (колесо ждёт перетаскивания)
+        self.by_category: dict[str, list[Path]] = {}
+        self.files: list[Path] = []
+        self.pages = [CONVERT_PAGE]
+        self.page = 0
+
+    def set_files(self, selected: list[Path] | None) -> None:
+        if selected == self.selected and selected is not None:
+            return
+        self.selected = selected
+        self.by_category = {}
+        for path in expand(selected or []):
+            if category := formats.detect(path):
+                self.by_category.setdefault(category, []).append(path)
+        self.files = [p for paths in self.by_category.values() for p in paths]
+        self.pages = [CONVERT_PAGE] + ([TOOLS_PAGE] if formats.IMAGE in self.by_category else [])
+        self.page = 0
+        self.show()
+
+    def run(self, timeout_ms: int = 0) -> object:
+        """Ждёт выбора, листая страницы и типы файлов. Возвращает (категория, формат),
+        ("tool", инструмент), "window" или None."""
+        while True:
+            data = self.wheel.choose(timeout_ms)
+            if isinstance(data, tuple) and data[0] == "page":
+                self.page = data[1]
+                self.show()
+            elif isinstance(data, tuple) and data[0] == "category":
+                self._show_formats(data[1])
+            else:
+                return data
+
+    def show(self) -> None:
+        files = self.files
+        self.wheel.title = (files[0].name if len(files) == 1 else plural_files(len(files)) if files
+                            else "DropConvert")
+        self.wheel.set_pages(self.pages, self.page)
+        if not self.by_category:
+            if self.selected is None:
+                self.wheel.set_items([], "Наведите", idle_caption="Перетащите файл на колесо")
+            elif not self.selected:
+                self.wheel.set_items([], "Щёлкните по файлу", idle_caption=f"Выделите файлы в {FILE_MANAGER}")
+            else:
+                self.wheel.set_items([], "Не поддерживается", idle_caption="Эти файлы DropConvert не конвертирует")
+        elif self.pages[self.page] == TOOLS_PAGE:
+            self._show_tools()
+        elif len(self.by_category) > 1:
+            self._show_categories()
+        else:
+            self._show_formats(next(iter(self.by_category)))
+
+    def _center_label(self, paths: list[Path]) -> str:
+        sources = {_SAME_FORMAT.get(e, e) for e in (p.suffix.lower().lstrip(".") for p in paths)}
+        return next(iter(sources)).upper() if len(sources) == 1 else plural_files(len(paths))
+
+    def _show_categories(self) -> None:
+        items = [
+            WheelItem(formats.CATEGORY_NAMES[c], ("category", c), plural_files(len(self.by_category[c])),
+                      f"{formats.CATEGORY_NAMES[c]}: выбрать формат", opens=True)
+            for c in formats.CATEGORY_ORDER if c in self.by_category
+        ]
+        self.wheel.set_items(items, self.wheel.title, "window", "Открыть в окне DropConvert", "Что конвертируем?")
+
+    def _show_formats(self, category: str) -> None:
+        paths = self.by_category[category]
+        sources = {_SAME_FORMAT.get(e, e) for e in (p.suffix.lower().lstrip(".") for p in paths)}
+        # Если все файлы уже в этом формате, сектор лишний
+        targets = [f for f in formats.TARGETS[category] if sources != {f}]
+        items = [
+            WheelItem(fmt.upper(), (category, fmt), _HINTS.get(category, {}).get(fmt, ""),
+                      f"Конвертировать в {fmt.upper()}")
+            for fmt in targets
+        ]
+        self.wheel.set_items(items, self._center_label(paths), "window", "Открыть в окне DropConvert",
+                             "Выберите формат")
+
+    def _show_tools(self) -> None:
+        images = self.by_category[formats.IMAGE]
+        items = [WheelItem(label, ("tool", tool), hint, caption)
+                 for tool, (label, hint, caption) in _TOOLS.items()]
+        what = "с картинкой" if len(images) == 1 else f"с картинками ({len(images)})"
+        self.wheel.set_items(items, self._center_label(images), "window", "Открыть в окне DropConvert",
+                             f"Что сделать {what}?")
 
 
 class Agent(QObject):
@@ -91,12 +199,18 @@ class Agent(QObject):
         self.progress: dict[int, float] = {}
         self.notified_output: Path | None = None
         self.menu_open = False
+        self.drag_wheel: FormatWheel | None = None
+        self.ring: ProgressRing | None = None
+        self.ring_failed = False
 
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(max(2, (os.cpu_count() or 2) // 2))
 
         self.trigger = MouseTrigger(self)
         self.trigger.activated.connect(lambda x, y: self.show_action_menu(x, y, allow_click=True))
+        # Сигналы перетаскивания приходят из потока перехватчика (macOS) или изнутри хука (Windows)
+        self.trigger.drag_key.connect(self.on_drag_key, Qt.ConnectionType.QueuedConnection)
+        self.trigger.drag_ended.connect(self.on_drag_ended, Qt.ConnectionType.QueuedConnection)
         self.trigger.ready.connect(
             lambda: self.notify("DropConvert готов", f"{GESTURE} по файлам в {FILE_MANAGER} открывает меню конвертации.")
         )
@@ -133,6 +247,7 @@ class Agent(QObject):
             m.addSeparator()
         if self.trigger.active:
             m.addAction(self.gesture_hint()).setEnabled(False)
+            m.addAction(DRAG_GESTURE).setEnabled(False)
         elif self.trigger.supported:
             m.addAction(f"{GESTURE} не работает: нет доступа").setEnabled(False)
             m.addAction("Разрешить «Универсальный доступ»…", self.request_permission)
@@ -187,65 +302,75 @@ class Agent(QObject):
             QTimer.singleShot(250, lambda: self.show_action_menu(x, y))
             return
 
-        by_category: dict[str, list[Path]] = {}
-        for path in expand(selected):
-            if category := formats.detect(path):
-                by_category.setdefault(category, []).append(path)
-        files = [p for paths in by_category.values() for p in paths]
-        title = files[0].name if len(files) == 1 else plural_files(len(files)) if files else "DropConvert"
-
-        wheel = FormatWheel(title)
-        if not by_category:
-            text = "Щёлкните по файлу" if not selected else "Не поддерживается"
-            wheel.set_items([], text, idle_caption=(
-                f"Выделите файлы в {FILE_MANAGER}" if not selected else "Эти файлы DropConvert не конвертирует"))
-        elif len(by_category) > 1:
-            self._show_categories(wheel, by_category, title)
-        else:
-            self._show_formats(wheel, *next(iter(by_category.items())), title)
-
+        wheel = FormatWheel("DropConvert")
+        session = WheelSession(wheel)
+        session.set_files(selected)
         self.menu_open = True
         try:
             with system.FocusKeeper():
                 wheel.popup(QCursor.pos())
-                data = wheel.choose(timeout_ms=1800 if not by_category else 0)
-                if isinstance(data, tuple) and data[0] == "category":
-                    self._show_formats(wheel, data[1], by_category[data[1]], title)
-                    data = wheel.choose()
-                wheel.close_animated()
+                data = session.run(timeout_ms=1800 if not session.by_category else 0)
+                center = wheel.center_global()
+                wheel.close_animated(collapse=self._is_job(data))
         finally:
             self.menu_open = False
+        self._apply(session, data, center)
 
+    # ----- Колесо при перетаскивании -----
+
+    def on_drag_key(self, step: int) -> None:
+        """Tab во время перетаскивания: первый открывает колесо, следующие листают страницы."""
+        if self.drag_wheel is not None:
+            self.drag_wheel.switch_page(step)
+        elif not self.menu_open:
+            self.show_drag_wheel()
+
+    def on_drag_ended(self) -> None:
+        # Кнопку отпустили, но бросок на колесо приходит чуть позже отпускания:
+        # даём ему время, иначе закроемся раньше, чем узнаем, на какой сектор бросили
+        if wheel := self.drag_wheel:
+            QTimer.singleShot(400, wheel, wheel.cancel)  # с контекстом: колесо к тому времени может исчезнуть
+
+    def show_drag_wheel(self) -> None:
+        wheel = FormatWheel("DropConvert")
+        session = WheelSession(wheel)
+        session.set_files(None)  # что тащат, станет известно, когда файл окажется над колесом
+        wheel.accept_files(session.set_files)
+        self.menu_open = True
+        self.drag_wheel = wheel
+        try:
+            wheel.popup(QCursor.pos(), activate=False)  # фокус не трогаем, иначе прервём перетаскивание
+            data = session.run()
+            center = wheel.center_global()
+            wheel.close_animated(collapse=self._is_job(data))
+        finally:
+            self.menu_open = False
+            self.drag_wheel = None
+        self._apply(session, data, center)
+
+    # ----- Выбор в колесе -----
+
+    @staticmethod
+    def _is_job(data: object) -> bool:
+        return isinstance(data, tuple)
+
+    def _apply(self, session: WheelSession, data: object, center: QPoint) -> None:
         if data == "window":
-            self.show_window(files)
+            self.show_window(session.files)
+        elif isinstance(data, tuple) and data[0] == "tool":
+            tool = data[1]
+            self.convert(session.by_category[formats.IMAGE], formats.IMAGE, tool,
+                         f"({TOOL_SUFFIXES[tool]})", center)
         elif isinstance(data, tuple):
             category, fmt = data
-            self.convert(by_category[category], category, fmt)
-
-    def _show_categories(self, wheel: FormatWheel, by_category: dict[str, list[Path]], title: str) -> None:
-        items = [
-            WheelItem(formats.CATEGORY_NAMES[c], ("category", c), plural_files(len(paths)),
-                      f"{formats.CATEGORY_NAMES[c]}: выбрать формат")
-            for c, paths in ((c, by_category[c]) for c in formats.CATEGORY_ORDER if c in by_category)
-        ]
-        wheel.set_items(items, title, "window", "Открыть в окне DropConvert", "Что конвертируем?")
-
-    def _show_formats(self, wheel: FormatWheel, category: str, paths: list[Path], title: str) -> None:
-        sources = {_SAME_FORMAT.get(e, e) for e in (p.suffix.lower().lstrip(".") for p in paths)}
-        # Если все файлы уже в этом формате, сектор лишний
-        targets = [f for f in formats.TARGETS[category] if sources != {f}]
-        items = [
-            WheelItem(fmt.upper(), (category, fmt), _HINTS.get(category, {}).get(fmt, ""),
-                      f"Конвертировать в {fmt.upper()}")
-            for fmt in targets
-        ]
-        center = next(iter(sources)).upper() if len(sources) == 1 else plural_files(len(paths))
-        wheel.set_items(items, center, "window", "Открыть в окне DropConvert", "Выберите формат")
+            self.convert(session.by_category[category], category, fmt, f"→ {fmt.upper()}", center)
 
     # ----- Конвертация -----
 
-    def convert(self, paths: list[Path], category: str, fmt: str) -> None:
-        batch = Batch(fmt, len(paths))
+    def convert(self, paths: list[Path], category: str, fmt: str, label: str,
+                at: QPoint | None = None) -> None:
+        """fmt — формат или инструмент из formats.TOOLS; at — где появится кольцо прогресса."""
+        batch = Batch(label, len(paths))
         for path in paths:
             item = Item(path, category)
             task = ConvertTask(item, fmt)
@@ -257,12 +382,22 @@ class Agent(QObject):
             self.batches[item.uid] = batch
             self.progress[item.uid] = 0.0
             self.pool.start(task)
-        self._update_tooltip()
+        if self.ring is None:
+            self.ring = ProgressRing()
+        if not self.ring.running:
+            self.ring_failed = False
+        self.ring.start(at or QCursor.pos())
+        self._update_progress()
 
     def _total_progress(self) -> int:
         return int(100 * sum(self.progress.values()) / len(self.progress)) if self.progress else 0
 
-    def _update_tooltip(self) -> None:
+    def _update_progress(self) -> None:
+        if self.ring is not None:
+            if self.tasks:
+                self.ring.set_value(self._total_progress() / 100)
+            else:
+                self.ring.finish(ok=not self.ring_failed)
         if self.tasks:
             self.tray.setToolTip(f"DropConvert: {plural_files(len(self.tasks))}, {self._total_progress()}%")
         else:
@@ -271,7 +406,7 @@ class Agent(QObject):
     def _on_progress(self, uid: int, value: float) -> None:
         if uid in self.progress:
             self.progress[uid] = value
-            self._update_tooltip()
+            self._update_progress()
 
     def _on_finished(self, uid: int, output: str) -> None:
         if batch := self._finish(uid):
@@ -279,6 +414,8 @@ class Agent(QObject):
             self._maybe_notify(batch)
 
     def _on_failed(self, uid: int, message: str) -> None:
+        if message != "Отменено":
+            self.ring_failed = True
         if batch := self._finish(uid):
             if message != "Отменено":
                 batch.errors.append(message)
@@ -287,7 +424,7 @@ class Agent(QObject):
     def _finish(self, uid: int) -> Batch | None:
         self.tasks.pop(uid, None)
         self.progress.pop(uid, None)
-        self._update_tooltip()
+        self._update_progress()
         batch = self.batches.pop(uid, None)
         if batch:
             batch.done += 1
@@ -305,7 +442,7 @@ class Agent(QObject):
         elif ok:
             self.notified_output = batch.last_output
             name = batch.last_output.name if ok == 1 and batch.last_output else (
-                f"{plural_files(ok)} → {batch.fmt.upper()}")
+                f"{plural_files(ok)} {batch.label}")
             self.notify("Готово", f"{name}\nНажмите, чтобы показать в {FILE_MANAGER}")
 
     def cancel_all(self) -> None:

@@ -36,6 +36,10 @@ TARGETS = {
 }
 
 
+# Инструменты для изображений: формат не меняется, рядом появляется изменённая копия
+TOOLS = ["compress", "strip", "trim", "half", "rotate", "gray", "white_bg"]
+
+
 def detect(path: Path) -> str | None:
     """Категория файла по расширению или None, если формат не поддерживается."""
     ext = path.suffix.lower().lstrip(".")

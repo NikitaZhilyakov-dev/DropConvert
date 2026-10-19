@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import formats
-from .converters import convert
+from .converters import apply_tool, convert
 
 ACCENT = "#FF8A1F"
 
@@ -60,6 +60,8 @@ class TaskSignals(QObject):
 
 
 class ConvertTask(QRunnable):
+    """Конвертация в формат fmt или, если fmt из formats.TOOLS, инструмент для картинки."""
+
     def __init__(self, item: Item, fmt: str):
         super().__init__()
         self.item, self.fmt = item, fmt
@@ -68,11 +70,14 @@ class ConvertTask(QRunnable):
     def run(self) -> None:
         uid = self.item.uid
         try:
-            out = convert(
-                self.item.path, self.fmt,
-                on_progress=lambda p: self.signals.progress.emit(uid, p),
-                cancel=self.item.cancel,
-            )
+            if self.fmt in formats.TOOLS:
+                out = apply_tool(self.item.path, self.fmt)
+            else:
+                out = convert(
+                    self.item.path, self.fmt,
+                    on_progress=lambda p: self.signals.progress.emit(uid, p),
+                    cancel=self.item.cancel,
+                )
             self.signals.finished.emit(uid, str(out))
         except Exception as e:
             self.signals.failed.emit(uid, str(e))
