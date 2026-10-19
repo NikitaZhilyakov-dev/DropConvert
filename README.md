@@ -33,7 +33,7 @@ DropConvert lives in the menu bar (macOS) or the tray (Windows) and works withou
 1. In Finder / File Explorer, hold **⌘** (macOS) or **Alt** (Windows) and right-click a file. If several files are selected, the menu opens for the whole selection.
 2. A wheel with formats that fit these files opens at the cursor; the regular context menu doesn't appear. If the selection mixes file types (say, images and video), pick the type first.
 3. Click the sector with the format you want. From the keyboard: arrows and Enter, digits 1–9, or Esc to close. Clicking the center of the wheel opens the files in the DropConvert window.
-4. The wheel collapses into a progress ring at the cursor: it shows the percentage and ends with a checkmark (or "!" if something failed). A notification also arrives; clicking it shows the result.
+4. The wheel collapses into a progress ring at the cursor: it shows the percentage and ends with a checkmark (or "!" if something failed). DropConvert shows no pop-up notifications: the icon's menu has "Show … in Finder" (File Explorer) for the last result and the text of the last error.
 
 **Wheel while dragging.** Start dragging a file (from Finder, File Explorer or the desktop) and, without releasing the button, press **Tab**. The wheel opens under the cursor; drop the file on the sector you want. If you release outside the wheel or press Esc, the wheel closes and the file stays where it was. When dragging files of different types, hold them over a type sector ("Images", "Video") and it springs open into formats.
 
@@ -55,7 +55,7 @@ All tools except Strip keep EXIF (capture date, camera). Animated GIF and WEBP a
 
 **Crop** opens a window with the image as it will come out (EXIF rotation applied) and a frame on top. Drag the frame's corners or edges to resize it, drag inside to move it, or drag outside to draw a new one. The buttons below lock the proportions (Free, Original, 1:1, 4:3, 3:2, 16:9); ⇄ swaps portrait and landscape. Enter or Save keeps the crop, Esc or Cancel closes the window. With several images they come one by one: Save queues the crop and shows the next image, Skip moves on, Cancel stops (crops already saved still happen). The chosen ratio carries over to the next image. The copy is `photo (cropped).jpg`; a JPEG is re-encoded at quality 92.
 
-Launch at login can be turned on from the icon's menu. Closing the window doesn't quit the app; quit from the icon's menu.
+Opening DropConvert doesn't show a window: it starts quietly in the menu bar (tray). The window opens from the icon's menu (on Windows, also by clicking the icon), from the center of the wheel, or by dropping files on the app icon. Launch at login can be turned on from the icon's menu. Closing the window doesn't quit the app; quit from the icon's menu.
 
 macOS asks for two permissions:
 - **Accessibility**, to intercept ⌘ + right-click and Tab while dragging. The prompt appears on first launch; enable DropConvert in System Settings → Privacy & Security → Accessibility. No restart needed. The app isn't signed, so after every rebuild macOS treats it as a new app: turn the switch off and on again.

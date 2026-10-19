@@ -13,14 +13,14 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, QPointF, QSettings, Qt, QThreadPool, QTimer
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from . import formats, office, system
 from .app import ACCENT, App, ConvertTask, Item, MainWindow, ask_page_range, expand, reveal_in_file_manager
-from .converters import CANCELLED, TOOL_SUFFIXES
+from .converters import CANCELLED
 from .editor import crop_images
 from .trigger import DRAG_GESTURE, GESTURE, MouseTrigger
 from .wheel import FormatWheel, ProgressRing, WheelItem
@@ -96,9 +96,8 @@ def tray_icon() -> QIcon:
 
 @dataclass
 class Batch:
-    """Files sent by one menu choice: they get a single notification."""
+    """Files sent by one menu choice: once all are done, the tray menu reports them together."""
 
-    label: str  # what was done: "→ PNG" or "(compressed)"
     total: int
     done: int = 0
     errors: list[str] = field(default_factory=list)
@@ -199,12 +198,13 @@ class Agent(QObject):
     def __init__(self, app: App) -> None:
         super().__init__()
         self.app = app
-        self.settings = QSettings("DropConvert", "DropConvert")
         self.window: MainWindow | None = None
         self.batches: dict[int, Batch] = {}
         self.tasks: dict[int, tuple[ConvertTask, Item]] = {}
         self.progress: dict[int, float] = {}
-        self.notified_output: Path | None = None
+        # What the tray menu reports instead of notifications: the last result and the last problem
+        self.last_output: Path | None = None
+        self.last_error: str | None = None
         self.menu_open = False
         self.drag_wheel: FormatWheel | None = None
         self.ring: ProgressRing | None = None
@@ -218,19 +218,14 @@ class Agent(QObject):
         # Drag signals come from the tap thread (macOS) or from inside the hook (Windows)
         self.trigger.drag_key.connect(self.on_drag_key, Qt.ConnectionType.QueuedConnection)
         self.trigger.drag_ended.connect(self.on_drag_ended, Qt.ConnectionType.QueuedConnection)
-        self.trigger.ready.connect(
-            lambda: self.notify("DropConvert is ready", f"{GESTURE} on files in {FILE_MANAGER} opens the convert menu.")
-        )
 
         self.tray = QSystemTrayIcon(tray_icon(), self)
         self.tray.setToolTip("DropConvert")
         self.tray_menu = QMenu()
+        self.tray_menu.setToolTipsVisible(True)  # the full text of a long error
         self.tray_menu.aboutToShow.connect(self._fill_tray_menu)
         self.tray.setContextMenu(self.tray_menu)
         self.tray.activated.connect(self._on_tray_activated)
-        self.tray.messageClicked.connect(
-            lambda: self.notified_output and reveal_in_file_manager(self.notified_output)
-        )
         self.tray.show()
 
         # Without Accessibility access macOS won't let us intercept the click; the system shows the prompt itself
@@ -251,6 +246,16 @@ class Agent(QObject):
         if self.tasks:
             m.addAction(f"Converting: {plural_files(len(self.tasks))} ({self._total_progress()}%)").setEnabled(False)
             m.addAction("Stop all", self.cancel_all)
+            m.addSeparator()
+        if self.last_error:
+            text = self.last_error if len(self.last_error) <= 80 else self.last_error[:79] + "…"
+            error = m.addAction(f"⚠ {text}")
+            error.setToolTip(self.last_error)
+            error.setEnabled(False)
+        if self.last_output and self.last_output.exists():
+            m.addAction(f"Show {self.last_output.name} in {FILE_MANAGER}",
+                        lambda: reveal_in_file_manager(self.last_output))
+        if self.last_error or self.last_output:
             m.addSeparator()
         if self.trigger.active:
             m.addAction(self.gesture_hint()).setEnabled(False)
@@ -280,11 +285,16 @@ class Agent(QObject):
         try:
             system.set_autostart(on)
         except OSError as e:
-            self.notify("Couldn't change launch at login", str(e), QSystemTrayIcon.MessageIcon.Warning)
+            self.last_error = f"Couldn't change launch at login: {e}"
 
-    def notify(self, title: str, text: str,
-               icon: QSystemTrayIcon.MessageIcon = QSystemTrayIcon.MessageIcon.Information) -> None:
-        self.tray.showMessage(title, text, icon, 5000)
+    def _flash_error(self, message: str) -> None:
+        """A problem outside a conversion: "!" at the cursor, the text goes to the tray menu."""
+        self.last_error = message
+        if self.ring is None:
+            self.ring = ProgressRing()
+        if not self.ring.running:  # a running conversion keeps its ring
+            self.ring.start(QCursor.pos())
+            self.ring.finish(ok=False)
 
     # ----- Action menu at the cursor -----
 
@@ -295,11 +305,10 @@ class Agent(QObject):
         try:
             selected = system.selected_files()
         except system.SelectionError as e:
-            self.notify("DropConvert", str(e), QSystemTrayIcon.MessageIcon.Warning)
+            self._flash_error(str(e))
             return
         except Exception as e:  # COM or AppleScript can fail in any way; the utility must keep running
-            self.notify("DropConvert", f"Couldn't get the selected files: {e}",
-                        QSystemTrayIcon.MessageIcon.Warning)
+            self._flash_error(f"Couldn't get the selected files: {e}")
             return
 
         if not selected and allow_click and x is not None:
@@ -385,23 +394,21 @@ class Agent(QObject):
             tool, *details = data[1:]
             boxes = details[0] if details else None  # "Crop": only the images saved in the editor
             self.convert(list(boxes) if boxes else session.by_category[formats.IMAGE], formats.IMAGE, tool,
-                         f"({TOOL_SUFFIXES[tool]})", center, boxes=boxes)
+                         center, boxes=boxes)
         elif isinstance(data, tuple) and data[1] == formats.PDF_EXTRACT:
             category, fmt, pages = data
-            self.convert(session.by_category[category], category, fmt, f"(pages {pages})", center, pages)
+            self.convert(session.by_category[category], category, fmt, center, pages)
         elif isinstance(data, tuple):
             category, fmt = data
-            paths = session.by_category[category]
-            self.convert(paths, category, fmt, f"→ {formats.label(category, fmt, paths)}", center)
+            self.convert(session.by_category[category], category, fmt, center)
 
     # ----- Conversion -----
 
-    def convert(self, paths: list[Path], category: str, fmt: str, label: str,
-                at: QPoint | None = None, pages: str | None = None,
+    def convert(self, paths: list[Path], category: str, fmt: str, at: QPoint | None = None, pages: str | None = None,
                 boxes: dict[Path, tuple[int, int, int, int]] | None = None) -> None:
         """fmt is a format or a tool from formats.TOOLS; at is where the progress ring appears;
         pages is the range for formats.PDF_EXTRACT, boxes the frame of each image for formats.CROP."""
-        batch = Batch(label, len(paths))
+        batch = Batch(len(paths))
         for path in paths:
             item = Item(path, category)
             task = ConvertTask(item, fmt, pages, boxes.get(path) if boxes else None)
@@ -442,7 +449,7 @@ class Agent(QObject):
     def _on_finished(self, uid: int, output: str) -> None:
         if batch := self._finish(uid):
             batch.last_output = Path(output)
-            self._maybe_notify(batch)
+            self._batch_done(batch)
 
     def _on_failed(self, uid: int, message: str) -> None:
         if message != CANCELLED:
@@ -450,7 +457,7 @@ class Agent(QObject):
         if batch := self._finish(uid):
             if message != CANCELLED:
                 batch.errors.append(message)
-            self._maybe_notify(batch)
+            self._batch_done(batch)
 
     def _finish(self, uid: int) -> Batch | None:
         self.tasks.pop(uid, None)
@@ -461,20 +468,17 @@ class Agent(QObject):
             batch.done += 1
         return batch
 
-    def _maybe_notify(self, batch: Batch) -> None:
+    def _batch_done(self, batch: Batch) -> None:
+        """The ring has shown ✓ or "!"; the tray menu keeps the result and the error text."""
         if batch.done < batch.total:
             return
-        ok = batch.total - len(batch.errors)
+        if batch.last_output:
+            self.last_output = batch.last_output
         if batch.errors:
-            self.notify(
-                f"Couldn't convert {len(batch.errors)} of {batch.total}",
-                batch.errors[0], QSystemTrayIcon.MessageIcon.Warning,
-            )
-        elif ok:
-            self.notified_output = batch.last_output
-            name = batch.last_output.name if ok == 1 and batch.last_output else (
-                f"{plural_files(ok)} {batch.label}")
-            self.notify("Done", f"{name}\nClick to show in {FILE_MANAGER}")
+            failed = "" if batch.total == 1 else f"{len(batch.errors)} of {batch.total} failed: "
+            self.last_error = failed + batch.errors[0]
+        elif batch.last_output:
+            self.last_error = None
 
     def cancel_all(self) -> None:
         for _, item in self.tasks.values():
@@ -496,11 +500,6 @@ class Agent(QObject):
 
     def _on_window_hidden(self) -> None:
         system.set_dock_icon_visible(False)
-        if not self.settings.value("trayHintShown", False, type=bool):
-            self.settings.setValue("trayHintShown", True)
-            where = "in the menu bar" if sys.platform == "darwin" else "in the tray"
-            hint = f"{self.gesture_hint()} opens the convert menu." if self.trigger.active else ""
-            self.notify("DropConvert keeps running", f"The icon is {where}. {hint}".strip())
 
     def quit(self) -> None:
         self.cancel_all()
@@ -548,7 +547,9 @@ def listen_for_instances(agent: Agent) -> QLocalServer:
                 files = [Path(f) for f in json.loads(buffer.decode() or "[]")]
             except ValueError:
                 files = []
-            agent.show_window(files)
+            # Opened again while running: files go to the window, a bare launch changes nothing
+            if files:
+                agent.show_window(files)
             socket.deleteLater()
 
         socket.readyRead.connect(read)
@@ -563,7 +564,6 @@ def run(argv: list[str]) -> int:
     app.setApplicationName("DropConvert")
     app.setQuitOnLastWindowClosed(False)
 
-    background = "--background" in argv[1:]
     # Windows: files dropped on the .exe or a shortcut arrive as arguments
     files = [Path(a) for a in argv[1:] if not a.startswith("--") and Path(a).exists()]
     if forward_to_running(files):
@@ -574,7 +574,9 @@ def run(argv: list[str]) -> int:
     # macOS: files dropped on the Dock icon arrive as a FileOpen event
     app.fileOpened.connect(lambda f: agent.show_window([Path(f)]))
 
-    if files or not background:
+    # No window on launch: the app lives in the menu bar (tray). Files dropped on the app icon
+    # still open it, since the window is where their format is chosen
+    if files:
         agent.show_window(files)
     else:
         system.set_dock_icon_visible(False)
