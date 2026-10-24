@@ -117,3 +117,7 @@ DropConvert.spec           PyInstaller build config
 To add a tool, add it to `TOOLS` in `formats.py`, to `TOOL_SUFFIXES` and `_apply_image_tool` in `converters.py`, and its labels to `_TOOLS` in `agent.py`.
 
 To add a format, add it to `TARGETS` in `formats.py` and set its options in `_PIL_FORMATS` (images) or `FFMPEG_ARGS` (video and audio) in `converters.py`. A new document type goes into `KINDS` in `office.py`.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
